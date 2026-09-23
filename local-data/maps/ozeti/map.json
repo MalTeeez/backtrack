@@ -1,0 +1,18 @@
+{
+  "id": "ozeti",
+  "name": "Ozeti",
+  "bounds": {
+    "minX": 57.58,
+    "maxX": 143.07,
+    "minY": 21.81,
+    "maxY": 99.56
+  },
+  "tileBounds": {
+    "minX": -0.03,
+    "maxX": 163.81,
+    "minY": -0.01,
+    "maxY": 163.83
+  },
+  "tileSize": 256,
+  "maxZoom": 6
+}

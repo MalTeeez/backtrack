@@ -1,0 +1,18 @@
+{
+  "id": "zestafona",
+  "name": "Zestafona",
+  "bounds": {
+    "minX": 19.9,
+    "maxX": 124.89,
+    "minY": 50.7,
+    "maxY": 141.9
+  },
+  "tileBounds": {
+    "minX": -0.03,
+    "maxX": 163.81,
+    "minY": -0.01,
+    "maxY": 163.83
+  },
+  "tileSize": 256,
+  "maxZoom": 6
+}

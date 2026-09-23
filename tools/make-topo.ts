@@ -1,7 +1,7 @@
 /**
  * Renders topographic map tiles from the downloaded terrain (tools/fetch-map-data.ts): shaded relief with height tints
  * and contour lines, in the same tile pyramid as the color imagery (src/lib/map/tiles.svelte.ts). The tiles go to
- * local-data/topo/<id>/<z>/<x>_<y>.png, for personal use like the rest of local-data/.
+ * local-data/topo/<id>/<z>/<x>_<y>.png (committed, like the rest of local-data/).
  * Run it with `bun tools/make-topo.ts [map ...]`. It rebuilds every tile.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

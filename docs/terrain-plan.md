@@ -45,10 +45,10 @@ The Terrain3D datasets of [apollyon-sys/wardogs-calculator](https://github.com/a
 
 ## Hosting
 
-Backtrack is for personal use. `tools/fetch-map-data.ts` downloads the manifests and the chunks under each playable
+`tools/fetch-map-data.ts` downloads the manifests and the chunks under each playable
 area (about 260 MB for the three maps) into `local-data/terrain/<map-id>/`, from the calculator's hosting under
 `https://assets.wardogs-artillery.com/releases/assets-v1/data/terrain/`. The dev and preview servers serve
-`local-data/` at `/local-data/`, and the build leaves it out. The map picker in Coordinates (`settings.map`) already
+`local-data/` at `/local-data/`, and the Pages workflow copies it into the site with the chunks gzipped. The map picker in Coordinates (`settings.map`) already
 exists for the map imagery, so the solver can use the same setting.
 
 ## Tests

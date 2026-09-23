@@ -4,5 +4,4 @@ dist
 test-results
 playwright-report
 tests/synthetic/out
-local-data
 *.log

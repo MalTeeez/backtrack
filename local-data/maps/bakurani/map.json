@@ -1,0 +1,18 @@
+{
+  "id": "bakurani",
+  "name": "Bakurani",
+  "bounds": {
+    "minX": 23.35,
+    "maxX": 133.6,
+    "minY": 19.34,
+    "maxY": 129.65
+  },
+  "tileBounds": {
+    "minX": -0.03,
+    "maxX": 163.81,
+    "minY": -0.01,
+    "maxY": 163.83
+  },
+  "tileSize": 256,
+  "maxZoom": 6
+}

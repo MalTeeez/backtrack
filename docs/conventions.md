@@ -152,8 +152,8 @@ The app has no landmarks. Each sighting gets its camera from vertical edges (pit
   both back: an annotation file joins the video of the same file name, or a clip with the name it records
   (`src/lib/capture/annotation.ts`, `clipFiles.ts`).
 - **Map data.** `bun tools/fetch-map-data.ts` downloads the color map tiles (zoom 0 to 6) and the terrain chunks of
-  Bakurani, Ozeti and Zestafona from the wardogs-calculator hosting into `local-data/` (about 850 MB, personal use).
-  `local-data/` is git-ignored, the dev and preview servers serve it at `/local-data/` (`vite.config.ts`), and the
+  Bakurani, Ozeti and Zestafona from the wardogs-calculator hosting into `local-data/` (about 920 MB).
+  `local-data/` is committed, the dev and preview servers serve it at `/local-data/` (`vite.config.ts`), and the
   build leaves it out. `src/lib/map/tiles.svelte.ts` draws the tiles under the crater map and the result map, for the
   map in `settings.map`.
 - **Topography.** `bun tools/make-topo.ts [map ...]` renders shaded relief with height tints and contour lines from the
