@@ -17,6 +17,7 @@
   let { result, map }: { result: ProjectResult; map?: MapId } = $props();
 
   let tick = $state(0); // bumped when a map tile arrives
+  let zoom = $state<string | null>(null); // the tile zoom drawn
   let info = $state<Awaited<ReturnType<typeof mapInfo>>>(null);
   $effect(() => { let live = true; if (map) mapInfo(map).then((i) => { if (live) info = i; }); else info = null; return () => { live = false; }; });
 
@@ -127,7 +128,7 @@
     shown = { cx, cy, sc };
     const T = (x: number, y: number): [number, number] => [W / 2 + (x - cx) * sc, H / 2 - (y - cy) * sc];
 
-    if (map && info) drawTiles(g, map, info, { toPx: (x, y) => T(x * 100, y * 100), pxPerUnit: sc * 100, width: W, height: H }, () => tick++);
+    zoom = map && info ? drawTiles(g, map, info, { toPx: (x, y) => T(x * 100, y * 100), pxPerUnit: sc * 100, width: W, height: H }, () => tick++) : null;
 
     // grid in game units
     const step = [100, 200, 500, 1000, 2000, 5000].find((v) => (Math.max(W, H) / sc) / v <= 14) ?? 5000;
@@ -252,6 +253,7 @@
     <span><span class="mr-1 inline-block h-0.5 w-4 bg-gun align-middle"></span>Track, gun, possible positions</span>
     <span><span class="mr-1 text-gun">X</span>Gun from its shots</span>
     <span><span class="mr-1 inline-block w-4 border-t-2 border-dashed border-gun align-middle"></span>Weapon range from the gun</span>
+    {#if zoom}<span>Zoom {zoom}</span>{/if}
   </div>
   <button class="btn sm absolute left-2 top-2" onclick={() => (manual = null)} disabled={!manual} title="Show the whole result"><Maximize2 size={12} /> Fit</button>
   <div class="absolute bottom-2 right-2"><MapStyle /></div>

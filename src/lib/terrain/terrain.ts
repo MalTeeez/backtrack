@@ -47,10 +47,17 @@ export class Terrain {
     return m.chunks[key] ? { key, lx: qx - cx * m.chunkQuads, ly: qy - cy * m.chunkQuads } : null;
   }
 
+  /** A chunk is raw 16-bit samples, or gzipped (the Pages build gzips them to fit the site limit). */
+  private async unpack(b: ArrayBuffer): Promise<DataView> {
+    if (b.byteLength === this.manifest.verticesPerSide ** 2 * 2) return new DataView(b);
+    const raw = new Blob([b]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new DataView(await new Response(raw).arrayBuffer());
+  }
+
   private chunk(key: string): Promise<DataView | null> {
     let p = this.chunks.get(key);
     if (!p) {
-      p = this.load(this.manifest.chunks[key].file).then((b) => (b ? new DataView(b) : null)).catch(() => null);
+      p = this.load(this.manifest.chunks[key].file).then((b) => (b ? this.unpack(b) : null)).catch(() => null);
       p.then((v) => this.loaded.set(key, v));
       this.chunks.set(key, p);
     }

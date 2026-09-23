@@ -24,6 +24,7 @@
   let width = $state(0);
   let hover = $state<{ x: number; y: number } | null>(null);
   let tick = $state(0); // bumped when a map tile arrives
+  let zoom = $state<string | null>(null); // the tile zoom drawn
   // square, but only as tall as the space from its top to the bottom of the page area, so it fits without a scroll
   let room = $state(window.innerHeight);
   const H = $derived(Math.max(240, Math.min(width, room)));
@@ -65,7 +66,7 @@
     const g = canvas.getContext('2d')!;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, width, H);
-    if (map && loadedInfo) drawTiles(g, map, loadedInfo, { toPx, pxPerUnit: scale, width, height: H }, () => tick++);
+    zoom = map && loadedInfo ? drawTiles(g, map, loadedInfo, { toPx, pxPerUnit: scale, width, height: H }, () => tick++) : null;
     g.font = `10px 'Commit Mono', monospace`;
     const step = [0.5, 1, 2, 5, 10, 20].find((s) => (width / scale) / s <= 16) ?? 20;
     g.strokeStyle = css('--line'); g.fillStyle = css('--muted'); g.lineWidth = 1;
@@ -142,7 +143,7 @@
     onwheel={wheel}
   ></canvas>
   <span class="pointer-events-none absolute right-1.5 top-1 border border-line bg-panel px-1.5 text-[11px] text-muted">
-    {hover ? `X ${hover.x.toFixed(2)}  Y ${hover.y.toFixed(2)}` : 'X -  Y -'}
+    {hover ? `X ${hover.x.toFixed(2)}  Y ${hover.y.toFixed(2)}` : 'X -  Y -'}{zoom ? `  Zoom ${zoom}` : ''}
   </span>
   <button class="btn sm absolute left-1.5 top-1" onclick={() => (view = fit())} title="Back to the crater and the weapon range">Fit</button>
   <div class="absolute bottom-1.5 right-1.5"><MapStyle /></div>

@@ -36,6 +36,22 @@ jobs:
         env:
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
 
+      # Map tiles, terrain and topography for the site. The terrain goes in gzipped (src/lib/terrain/terrain.ts reads
+      # both), which takes the site from just over the 1 GB Pages limit to about 0.9 GB.
+      - id: map-data
+        uses: actions/cache@v4
+        with:
+          path: local-data
+          key: map-data-${{ hashFiles('tools/fetch-map-data.ts', 'tools/make-topo.ts') }}
+
+      - if: steps.map-data.outputs.cache-hit != 'true'
+        run: bun tools/fetch-map-data.ts && bun tools/make-topo.ts
+
+      - run: |
+          cp -r local-data dist/
+          find dist/local-data/terrain -name '*.bin' -exec sh -c 'gzip -9nc "$1" > "$1.gz" && mv "$1.gz" "$1"' _ {} \;
+          du -sh dist
+
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist

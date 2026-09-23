@@ -1,6 +1,7 @@
 /**
  * Downloads the map imagery (color tiles) and the terrain chunks of the WARDOGS maps from the wardogs-calculator
- * hosting into local-data/, for personal use. local-data/ stays out of git and out of the build (vite.config.ts).
+ * hosting into local-data/. local-data/ stays out of git and out of the build; the Pages workflow runs this script and
+ * copies the result into dist/.
  * The script skips files that exist, so a second run resumes. Run it with `bun tools/fetch-map-data.ts [--dry]`.
  */
 import { existsSync, mkdirSync, statSync } from 'node:fs';

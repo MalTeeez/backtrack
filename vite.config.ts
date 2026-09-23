@@ -14,7 +14,7 @@ const base = basePath === '' || basePath === '/' ? '/' : `/${basePath.replace(/^
 
 /**
  * Serves local-data/ (map tiles and terrain from tools/fetch-map-data.ts) at /local-data/ in `dev` and `preview`.
- * The data is for personal use, so the build never copies it into dist/.
+ * The build leaves it out of dist/; the Pages workflow fetches its own copy (tools/fetch-map-data.ts) and copies it in.
  */
 function localData(): Plugin {
   const root = fileURLToPath(new URL('./local-data/', import.meta.url));

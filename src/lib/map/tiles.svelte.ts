@@ -57,13 +57,14 @@ export interface View { toPx: (x: number, y: number) => [number, number]; pxPerU
 
 /**
  * Draws the tiles that the view shows, at the zoom that matches its scale. Tiles that are still loading call
- * `redraw` once they arrive.
+ * `redraw` once they arrive. Returns the zoom as "z/max", or null when the view misses the map.
  */
 export function drawTiles(g: CanvasRenderingContext2D, id: MapId, info: MapInfo, v: View, redraw: () => void) {
   const tb = info.tileBounds;
   const worldW = tb.maxX - tb.minX, worldH = tb.maxY - tb.minY;
   const maxZoom = tiles.style === 'topo' ? Math.min(info.maxZoom, TOPO_MAX_ZOOM) : info.maxZoom;
-  const z = Math.max(0, Math.min(maxZoom, Math.round(Math.log2((v.pxPerUnit * worldW) / info.tileSize))));
+  const dpr = g.getTransform().a; // the canvas scale: device pixels per CSS pixel
+  const z = Math.max(0, Math.min(maxZoom, Math.round(Math.log2((v.pxPerUnit * dpr * worldW) / info.tileSize))));
   const n = 2 ** z, w = worldW / n, h = worldH / n;
   // the game-unit rectangle the canvas shows, clipped to the playable area
   const [x0, y1] = [unitX(0), unitY(0)], [x1, y0] = [unitX(v.width), unitY(v.height)];
@@ -71,7 +72,7 @@ export function drawTiles(g: CanvasRenderingContext2D, id: MapId, info: MapInfo,
   function unitY(py: number) { const a = v.toPx(0, 0)[1], b = v.toPx(0, 1)[1]; return (py - a) / (b - a); }
   const left = Math.max(x0, info.bounds.minX), right = Math.min(x1, info.bounds.maxX);
   const bottom = Math.max(y0, info.bounds.minY), top = Math.min(y1, info.bounds.maxY);
-  if (left >= right || bottom >= top) return;
+  if (left >= right || bottom >= top) return null;
   const tx0 = Math.max(0, Math.floor((left - tb.minX) / w)), tx1 = Math.min(n - 1, Math.floor((right - tb.minX) / w));
   const ty0 = Math.max(0, Math.floor((tb.maxY - top) / h)), ty1 = Math.min(n - 1, Math.floor((tb.maxY - bottom) / h));
   g.save();
@@ -94,4 +95,5 @@ export function drawTiles(g: CanvasRenderingContext2D, id: MapId, info: MapInfo,
     g.drawImage(img, px, py, qx - px + 0.5, qy - py + 0.5); // half a pixel of overlap hides the seams
   }
   g.restore();
+  return `${z}/${maxZoom}`;
 }
