@@ -86,6 +86,8 @@ describe('ballistic model', () => {
       expect(dist(r.gun, scene.G)).toBeLessThan(2);
       const [dx, dy] = r.fit.shifts.clip;
       expect(Math.hypot(scene.C[0] + dx - scene.O[0], scene.C[1] + dy - scene.O[1])).toBeLessThan(2);
+      // a fit this close gives no "fit error is high" note
+      expect(r.fit.excess).toBeLessThan(0.5);
     });
   }
 
@@ -96,7 +98,11 @@ describe('ballistic model', () => {
     expect(dist(near.gun, tr.G)).toBeLessThan(2);
     // a wrong heading with a small tolerance gives no good fit
     const wrong = solveShot(exactRays(), tr.C, { ...opt, center: back + 90, tol: 10 });
-    if (wrong.error === undefined) expect(wrong.fit.rms).toBeGreaterThan(1);
+    if (wrong.error === undefined) {
+      expect(wrong.fit.rms).toBeGreaterThan(1);
+      // far from the observer, the miss is more than the positions and the flight model explain
+      expect(wrong.fit.excess).toBeGreaterThan(0.5);
+    }
   });
 
   test('too few sightings is an error, not a guess', () => {
@@ -157,7 +163,7 @@ describe('sightings', () => {
     s.edges = [[{ x: 650, y: 400 }, { x: 650.5, y: 380 }]];
     expect(solver().solve(s).warnings[0]).toContain('only accurate to');
     // two edges 1 deg apart agree within their errors, and a strongly tilted third edge does not
-    s.edges = [tr.edges[0], [tr.edges[1][0], { x: tr.edges[1][1].x + 25, y: tr.edges[1][1].y }]];
+    s.edges = [tr.edges[0], [tr.edges[1][0], { x: tr.edges[1][1].x + 2, y: tr.edges[1][1].y }]];
     expect(solver().solve(s).warnings.some((w) => w.includes('differs'))).toBe(false);
     s.edges = [tr.edges[0], tr.edges[1], [tr.edges[1][0], { x: tr.edges[1][1].x + 120, y: tr.edges[1][1].y }]];
     expect(solver().solve(s).warnings.some((w) => w.includes('Edge 3 differs'))).toBe(true);

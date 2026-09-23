@@ -18,7 +18,10 @@ export function sceneFrames(tr: Truth, dt = 1 / 240): SceneFrames {
   for (let t = 0; t <= tr.duration; t += dt) {
     const f = frameAt(tr, t);
     frames.push(f.shell ? [f.shell.x, f.shell.y] : null);
-    flashes.push(f.flash ? [f.flash.at.x, f.flash.at.y, f.flash.r] : null);
+    // the observer stands next to the crater and films the flight, so the crater is often off to the side: its
+    // flash then lights up the nearest edge of the frame
+    const clamp = (v: number, hi: number) => Math.max(0, Math.min(hi, v));
+    flashes.push(f.flash ? [clamp(f.flash.at.x, tr.W), clamp(f.flash.at.y, tr.H), f.flash.r] : null);
   }
   return {
     W: tr.W, H: tr.H, dt, duration: tr.duration,
