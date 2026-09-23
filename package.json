@@ -1,0 +1,34 @@
+{
+  "name": "backtrack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Find the position of an enemy gun in WARDOGS from video sightings of its shells",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "bun test tests/unit",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "check": "bun run typecheck && bun test tests/unit",
+    "bench": "bun tests/synthetic/benchmark.ts",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource/commit-mono": "5.3.0",
+    "@lucide/svelte": "^1.34.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "@tailwindcss/vite": "4.3.3",
+    "idb": "^8.0.0",
+    "mediabunny": "1.56.1",
+    "svelte": "5.56.9",
+    "tailwindcss": "4.3.3",
+    "vite": "8.2.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/bun": "1.4.2",
+    "svelte-check": "4.7.6",
+    "typescript": "~6"
+  }
+}

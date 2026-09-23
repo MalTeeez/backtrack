@@ -1,0 +1,357 @@
+/* The visual style follows pi.dev. It uses graph paper, square 1px panels, bracket buttons and one blue accent.
+   Body text is mono, small text is VG5000, and big and header text is Archivo Black.
+   The dark theme is the default. The light theme applies when the user or the system selects it. */
+@import 'tailwindcss';
+
+@import '@fontsource/commit-mono/400.css';
+@import '@fontsource/commit-mono/700.css';
+
+/* both fonts come from the system fonts and use the OFL (src/fonts/README.md) */
+@font-face {
+  font-family: 'VG5000';
+  src: url('./fonts/VG5000-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Archivo Black';
+  src: url('./fonts/ArchivoBlack-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+
+/* ---------- palette (runtime variables that data-theme switches) ---------- */
+:root {
+  color-scheme: dark;
+  --bg: #161d27;
+  --panel: #212730e6;
+  --panel-solid: #212730;
+  --panel-soft: #252f3dd1;
+  --line: #49505980;
+  --line-strong: #757d8975;
+  --text: #ebe7e4;
+  --copy: #ebe7e4bf;
+  --muted: #9fa4abad;
+  --muted-strong: #d5d8dbcc;
+  --accent: #6a9fcc;
+  --ok: #5db87a;
+  --warn: #e8993a;
+  --bad: #e8704f;
+  --grid-minor: hsl(218 60% 80% / 0.0094);
+  --grid-major: hsl(218 60% 80% / 0.026);
+  --grid-cross: hsl(218 60% 80% / 0.075);
+  --vignette: #0d11161f;
+  --tint: #ffffff05;
+  --head-bg: #ffffff0b;
+  --control-bg: #ffffff04;
+  --control-bg-hover: #ffffff09;
+  --focus-ring: #6a9fccb8;
+  --accent-soft: #6a9fcc13;
+  --accent-fill: #6a9fcc33;
+  --accent-border: #6a9fcc66;
+  --accent-border-active: #6a9fcc80;
+  --selection: #6a9fcc3d;
+  --scroll: #2f5f8a47;
+  --nav-bg: linear-gradient(180deg, #212730f7, #0d1116e8), linear-gradient(90deg, #4b607c24, #2f5f8a14);
+  --nav-border: #495059bd;
+  --nav-highlight: #9fa4ab47;
+  /* mark colors on the map */
+  --shell: #e1b06e;
+  --edge: #6a9fcc;
+  --impact: #e8993a;
+  --gun: #e8704f;
+  --stage: #0d1116;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #ebe7e4;
+  --panel: #f4f2f0;
+  --panel-solid: #f4f2f0;
+  --panel-soft: #eef1f3;
+  --line: #8b847d59;
+  --line-strong: #5c575240;
+  --text: #252f3df5;
+  --copy: #384251dc;
+  --muted: #5c5752c4;
+  --muted-strong: #394352d6;
+  --accent: #4b607c;
+  --ok: #3d8a57;
+  --warn: #a8661c;
+  --bad: #844f3b;
+  --grid-minor: #252f3d08;
+  --grid-major: #252f3d12;
+  --grid-cross: #252f3d1d;
+  --vignette: #ebe7e426;
+  --tint: #252f3d0d;
+  --head-bg: #252f3d0f;
+  --control-bg: #252f3d08;
+  --control-bg-hover: #252f3d10;
+  --focus-ring: #4b607c80;
+  --accent-soft: #4b607c10;
+  --accent-fill: #4b607c21;
+  --accent-border: #4b607c57;
+  --accent-border-active: #4b607c73;
+  --selection: #4b607c24;
+  --scroll: #4b607c3d;
+  --nav-bg: linear-gradient(180deg, #f3f2f0f4, #ebe7e4ee), linear-gradient(90deg, #eacd7c20, #4b607c12);
+  --nav-border: #b3ada7cf;
+  --nav-highlight: #f3f2f0;
+  --impact: #b86b52;
+  --gun: #8f3222;
+  --stage: var(--bg); /* behind the video: the near-white page color */
+}
+
+/* Tailwind utilities (text-muted, bg-panel, border-line and others) that follow the theme */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-soft: var(--panel-soft);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-text: var(--text);
+  --color-copy: var(--copy);
+  --color-muted: var(--muted);
+  --color-muted-strong: var(--muted-strong);
+  --color-accent: var(--accent);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-shell: var(--shell);
+  --color-edge: var(--edge);
+  --color-impact: var(--impact);
+  --color-gun: var(--gun);
+  --color-stage: var(--stage);
+  --font-mono: 'Commit Mono', ui-monospace, Menlo, Consolas, monospace;
+  --font-small: 'VG5000', 'Commit Mono', ui-monospace, Menlo, Consolas, monospace;
+  --font-display: 'Archivo Black', 'Arial Black', Impact, sans-serif;
+}
+
+@layer base {
+  /* Tailwind resets buttons to the default cursor; every clickable button gets the pointer */
+  button:not(:disabled) { cursor: pointer; }
+  html {
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+  }
+  /* graph paper with minor lines, major lines and small crosses on the major intersections */
+  body::before,
+  body::after {
+    content: '';
+    position: fixed;
+    inset: -8rem;
+    z-index: -1;
+    pointer-events: none;
+  }
+  body::before {
+    --gap: 4px;
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(var(--grid-minor) 0 1px, transparent 1px var(--gap)),
+      linear-gradient(to right, var(--grid-minor) 0 1px, transparent 1px var(--gap)),
+      linear-gradient(var(--grid-major) 0 1px, transparent 1px calc(var(--gap) * 5)),
+      linear-gradient(to right, var(--grid-major) 0 1px, transparent 1px calc(var(--gap) * 5)),
+      radial-gradient(circle at center, transparent calc(var(--gap) / 2), var(--bg) calc(var(--gap) / 2) 100%),
+      linear-gradient(var(--grid-cross) 0 1px, transparent 1px calc(var(--gap) * 5)),
+      linear-gradient(to right, var(--grid-cross) 0 1px, transparent 1px calc(var(--gap) * 5));
+    background-size:
+      var(--gap) var(--gap), var(--gap) var(--gap),
+      calc(var(--gap) * 5) calc(var(--gap) * 5), calc(var(--gap) * 5) calc(var(--gap) * 5),
+      calc(var(--gap) * 5) calc(var(--gap) * 5), calc(var(--gap) * 5) calc(var(--gap) * 5),
+      calc(var(--gap) * 5) calc(var(--gap) * 5);
+    background-position: 0 0, 0 0, 0 0, 0 0, calc(var(--gap) * -2.5) calc(var(--gap) * -2.5), 0 0, 0 0;
+  }
+  body::after { background: linear-gradient(to bottom, var(--vignette), var(--bg) 90%); opacity: 0.6; }
+
+  button, input, select, textarea { font: inherit; color: inherit; }
+  ::selection { background: var(--selection); }
+  :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -1px; }
+  * { scrollbar-color: var(--scroll) transparent; scrollbar-width: thin; }
+  input[type='checkbox'] { accent-color: var(--accent); width: 13px; height: 13px; }
+  /* a key cap: a tint of the text color, so it is a little brighter than its ground in dark mode and darker in light */
+  kbd {
+    display: inline-flex; align-items: center; justify-content: center; min-width: 1.7em; height: 1.7em; padding: 0 0.4em;
+    border: 1px solid color-mix(in srgb, var(--text) 22%, transparent); border-bottom-width: 2px; border-radius: 4px;
+    background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text);
+    font-family: var(--font-mono); font-size: 10px; font-weight: 500; line-height: 1; text-transform: none; letter-spacing: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+}
+
+@layer components {
+  /* ---------- surfaces ---------- */
+  .card { min-width: 0; position: relative; border: 1px solid var(--line-strong); background: var(--panel); }
+  .card-head {
+    display: flex; align-items: center; gap: 0.75rem; min-height: 40px;
+    padding: 0.45rem 0.9rem; border-bottom: 1px solid var(--line);
+  }
+  .card-title { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1.2; color: var(--text); }
+  .card-meta { margin-left: auto; display: flex; align-items: center; gap: 0.6rem; color: var(--muted); font-family: var(--font-small); font-size: 11.5px; }
+  .card-body { padding: 0.9rem; }
+  .label { display: block; font-family: var(--font-small); font-weight: 400; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1.3; color: var(--muted); }
+  .label.accent { color: var(--accent); }
+  .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .title { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.02em; line-height: 0.95; }
+  .big { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.01em; line-height: 1.1; }
+
+  /* ---------- controls ---------- */
+  .control {
+    width: 100%; min-height: 34px; padding: 0.3rem 0.6rem;
+    border: 1px solid var(--line); border-radius: 0; background: var(--panel-soft);
+    color: var(--text); font-family: var(--font-mono); font-size: 13px; line-height: 1;
+  }
+  .control::placeholder { color: var(--muted); opacity: 1; }
+  .control:hover { border-color: var(--line-strong); }
+  .control:focus-visible { border-color: var(--accent-border-active); outline: 2px solid var(--focus-ring); outline-offset: -1px; }
+  .control:disabled { opacity: 0.5; }
+  select.control { cursor: pointer; }
+  select.control option { background: var(--panel-solid); color: var(--text); }
+
+  /* [ BRACKET ] buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+    min-height: 34px; padding: 0.35rem 0.7rem;
+    border: 1px solid var(--line); border-radius: 0; background: var(--control-bg);
+    color: var(--muted-strong); cursor: pointer; white-space: nowrap;
+    font-family: var(--font-small); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; line-height: 1;
+    transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+  }
+  .btn::before, .btn::after { color: var(--accent); display: inline-block; transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .btn::before { content: '['; margin-right: 0.2ch; }
+  .btn::after { content: ']'; margin-left: 0.2ch; }
+  .btn:hover:not(:disabled) { border-color: var(--accent-border); background: var(--control-bg-hover); color: var(--text); }
+  .btn:hover:not(:disabled)::before { transform: translateX(-3px); }
+  .btn:hover:not(:disabled)::after { transform: translateX(3px); }
+  .btn:disabled { cursor: default; opacity: 0.4; }
+  .btn.primary { border-color: var(--accent-border-active); background: var(--accent-fill); color: var(--text); }
+  .btn.danger { color: var(--bad); }
+  .btn.danger::before, .btn.danger::after { color: var(--bad); }
+  /* a square button with only an icon and no brackets */
+  .btn.icon { min-width: 34px; padding: 0.35rem; }
+  .btn.icon::before, .btn.icon::after { content: none; }
+  .btn.sm { min-height: 28px; padding: 0.2rem 0.5rem; font-size: 10.5px; }
+  .btn.icon.sm { min-width: 28px; }
+
+  /* a selectable box, like the "session shape" options on pi.dev */
+  .option {
+    display: inline-flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    min-height: 34px; padding: 0.35rem 0.7rem;
+    border: 1px solid var(--line); background: transparent; color: var(--muted-strong); cursor: pointer; text-align: left;
+    transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+  }
+  .option:hover { border-color: var(--accent-border); color: var(--text); }
+  .option[aria-pressed='true'] { border-color: var(--accent-border-active); background: var(--accent-fill); color: var(--text); }
+
+  /* the big mark tools, the main entry point of the Mark phase */
+  .tool {
+    display: inline-flex; align-items: center; gap: 0.75rem; min-height: 56px; padding: 0.5rem 1.1rem;
+    border: 1px solid var(--accent-border); background: var(--accent-soft); color: var(--text); cursor: pointer; text-align: left;
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+  .tool:hover { border-color: var(--accent-border-active); background: var(--accent-fill); }
+  .tool[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-fill); box-shadow: inset 0 -3px 0 var(--accent); }
+  .tool-label { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.1; }
+  /* no tool picked yet: a slow pulse points at the tools */
+  .tool.idle { animation: tool-pulse 2.4s ease-in-out infinite; }
+  @keyframes tool-pulse { 50% { border-color: var(--accent); } }
+
+  /* the phase bar: tabs in a row with arrows between them, like the install tabs on pi.dev */
+  .phasebar { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+  .tab {
+    position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+    padding: 0.5rem 1rem; border: 1px solid var(--line); background: var(--control-bg); cursor: pointer;
+    color: var(--muted); font-family: var(--font-small); font-weight: 400; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap;
+    transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+  }
+  .tab::after { content: ''; position: absolute; inset: auto -1px -1px -1px; height: 2px; background: var(--accent); transform: scaleX(0); transition: transform 220ms ease; }
+  .tab:hover:not(:disabled) { color: var(--text); border-color: var(--accent-border); }
+  .tab[aria-pressed='true'] { color: var(--text); border-color: var(--accent-border-active); background: var(--accent-soft); }
+  .tab[aria-pressed='true']::after { transform: scaleX(1); }
+  /* a phase that is not open yet */
+  .tab:disabled { cursor: not-allowed; opacity: 0.4; border-style: dashed; }
+
+  /* ---------- data ---------- */
+  .dl { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr); gap: 0.4rem 1.25rem; margin: 0; align-items: baseline; }
+  .dl dt { font-family: var(--font-small); font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
+  .dl dd { margin: 0; color: var(--text); }
+
+  .table { width: 100%; border-collapse: collapse; color: var(--muted-strong); font-size: 12.5px; }
+  .table th, .table td { padding: 0.45rem 0.65rem; border-top: 1px solid var(--line); text-align: left; white-space: nowrap; vertical-align: middle; }
+  .table thead th { border-top: 0; background: var(--head-bg); color: var(--accent); font-family: var(--font-small); font-size: 10.5px; font-weight: 400; letter-spacing: 0.12em; text-transform: uppercase; }
+  .table tbody tr:hover { background: var(--tint); }
+
+  .tag {
+    display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.4rem; border: 1px solid var(--line);
+    font-family: var(--font-small); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; line-height: 1.4; color: var(--muted-strong);
+  }
+  .tag.accent { border-color: var(--accent-border); color: var(--accent); background: var(--accent-soft); }
+  .tag.ok { border-color: color-mix(in srgb, var(--ok) 45%, transparent); color: var(--ok); }
+  .tag.warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); color: var(--warn); }
+  .tag.bad { border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); }
+
+  /* a status line with a colored stripe on the left */
+  .note {
+    margin: 0; padding: 0.35rem 0.6rem; border: 1px solid var(--line); border-left: 2px solid var(--muted);
+    background: var(--tint); color: var(--copy); font-size: 12px; line-height: 1.45;
+  }
+  .note.ok { border-left-color: var(--ok); }
+  .note.warn { border-left-color: var(--warn); color: color-mix(in srgb, var(--warn) 70%, var(--text)); }
+  .note.bad { border-left-color: var(--bad); color: color-mix(in srgb, var(--bad) 75%, var(--text)); }
+  .note.info { border-left-color: var(--accent); }
+
+  .drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6rem; cursor: pointer;
+    min-height: 9rem; padding: 1rem; border: 1px dashed var(--line-strong); color: var(--muted-strong); text-align: center;
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+  .drop:hover, .drop.is-over { border-color: var(--accent-border-active); background: var(--accent-soft); color: var(--text); }
+
+  /* a disclosure, like "show configuration" on pi.dev */
+  .disclosure > summary {
+    display: flex; align-items: center; gap: 0.6rem; min-height: 34px; padding: 0.4rem 0.7rem; cursor: pointer; list-style: none;
+    border: 1px solid var(--line); background: var(--control-bg);
+    font-family: var(--font-small); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-strong);
+  }
+  .disclosure > summary::-webkit-details-marker { display: none; }
+  .disclosure > summary::after {
+    content: ''; margin-left: auto; width: 0.42rem; height: 0.42rem; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor;
+    transform: rotate(-45deg); transition: transform 140ms ease;
+  }
+  .disclosure[open] > summary { border-color: var(--accent-border); background: var(--tint); color: var(--text); }
+  .disclosure[open] > summary::after { transform: rotate(45deg); }
+
+  /* info popovers */
+  .info-btn {
+    display: inline-grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--line); cursor: pointer;
+    background: var(--control-bg); color: var(--muted); font-family: var(--font-display); font-size: 11px; line-height: 1;
+  }
+  .info-btn:hover { border-color: var(--accent-border); color: var(--accent); }
+  .pop {
+    margin: auto; width: var(--w, 380px); max-width: 92vw; max-height: 88vh; overflow: auto; padding: 1rem;
+    border: 1px solid var(--line-strong); background: var(--panel-solid); color: var(--copy); font-size: 12.5px; line-height: 1.55;
+    box-shadow: 0 10px 40px #0000004d;
+  }
+  .pop::backdrop { background: #0d111680; }
+  /* a popover that drops down at the top right, under its button in the top bar */
+  .pop.corner { margin: 3.75rem 0.5rem auto auto; }
+  .pop.corner::backdrop { background: transparent; }
+  .pop p { margin: 0 0 0.6rem; }
+  .pop p:last-child { margin: 0; }
+  .pop em { font-style: normal; color: var(--text); }
+
+  /* the top bar */
+  .navbar {
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; padding: 0.45rem 0.75rem;
+    background: var(--nav-bg); border: 1px solid var(--nav-border); border-top-color: var(--nav-highlight);
+  }
+}
