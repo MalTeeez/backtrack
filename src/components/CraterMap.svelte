@@ -8,14 +8,16 @@
   import { compassRose, css } from './mark/draw.ts';
   import { drawTiles, mapInfo } from '../lib/map/tiles.svelte.ts';
   import { SOURCE_TOL_DEG } from '../lib/solver/sightings.ts';
-  import type { MapId, Shot } from '../lib/solver/types.ts';
+  import type { Id, MapId, Shot } from '../lib/solver/types.ts';
   import { theme } from '../lib/state/theme.svelte.ts';
+  import { ui } from '../lib/state/project.svelte.ts';
   import MapStyle from './MapStyle.svelte';
   import MapChooser from './MapChooser.svelte';
   import { craterGame } from '../lib/solver/sightings.ts';
 
-  let { shot, reachM, map, onpick, observer }: {
-    shot: Shot; reachM: number; map: MapId | undefined;
+  let { viewId, shot, reachM, map, onpick, observer }: {
+    /** Where the view is kept (ui.mapViews): the shot for the crater, the sighting for where the user stood. */
+    viewId: Id; shot: Shot; reachM: number; map: MapId | undefined;
     onpick?: (p: { x: number; y: number }) => void; observer?: { x?: number; y?: number } | null;
   } = $props();
   const seen = $derived(observer?.x != null && observer?.y != null ? { x: observer.x, y: observer.y } : null);
@@ -50,7 +52,9 @@
   // the view: center and span (game units across the shorter side). It starts on the crater, wide enough for the
   // weapon range, and the wheel and drags change it.
   const fit = () => ({ cx: seen?.x ?? crater?.x ?? 80, cy: seen?.y ?? crater?.y ?? 80, span: onpick ? 6 : (reachM * 2.2) / 100 || 30 });
-  let view = $state(fit());
+  // the map opens where the user left it
+  let view = $state(ui.mapViews[viewId] || fit());
+  $effect(() => { ui.mapViews[viewId] = { ...view }; });
   const scale = $derived(Math.min(width, H) / view.span); // px per game unit
   const toPx = (x: number, y: number): [number, number] => [width / 2 + (x - view.cx) * scale, H / 2 - (y - view.cy) * scale];
   const toGame = (e: MouseEvent) => {

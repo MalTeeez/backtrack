@@ -13,7 +13,7 @@
   import { shellSpeeds } from '../../lib/solver/motion.ts';
   import { readVideoCompass, readVideoCompassRaw } from '../../lib/video/compassRead.ts';
   import { MIN_CORR, MIN_MARGIN } from '../../lib/video/compass.ts';
-  import { addShot, clips, currentShot, fixShot, project, sameFrame, shotsOf, sightingAt, uid, ui } from '../../lib/state/project.svelte.ts';
+  import { addShot, clips, clipView, currentShot, fixShot, project, sameFrame, shotsOf, sightingAt, uid, ui } from '../../lib/state/project.svelte.ts';
   import { clipFrames, clipUrl } from '../../lib/state/persistence.ts';
   import { frameIndexAt, frameTimeAt, seekTimeFor } from '../../lib/video/frames.ts';
   import type { Id, Pt, Sighting } from '../../lib/solver/types.ts';
@@ -34,8 +34,7 @@
   let playing = $state(false);
   // playback speed; a new clip resets playbackRate to defaultPlaybackRate, so both change
   const SPEEDS = [0.25, 0.5, 0.75, 1, 2];
-  let speed = $state(1);
-  $effect(() => { video.defaultPlaybackRate = video.playbackRate = speed; });
+  $effect(() => { video.defaultPlaybackRate = video.playbackRate = ui.speed; });
   let hover = $state<Pt | null>(null);
   let lock = $state<Pt | null>(null); // a locked magnifier spot
   let pending = $state<Pt | null>(null); // first point of an edge
@@ -95,9 +94,13 @@
   video.addEventListener('loadeddata', shown);
   video.addEventListener('pause', () => { playing = false; shown(); });
   // the section of the timeline that playback repeats (Timeline.svelte), for the loaded clip
-  let section = $state<{ a: number; b: number } | null>(null);
-  // a section belongs to one clip
-  $effect(() => { void loaded; section = null; });
+  const section = $derived((loaded && ui.clipViews[loaded]?.loop) || null);
+  const setSection = (s?: { a: number; b: number } | null) => { if (loaded) clipView(loaded).loop = s ?? undefined; };
+  // the frame on screen, kept while paused, so the clip opens on it again (after a phase change or a reload)
+  $effect(() => {
+    const t = frameTime;
+    if (loaded && !playing) untrack(() => clipView(loaded!)).t = t;
+  });
   video.addEventListener('play', () => {
     playing = true;
     // playback starts inside the section, and goes back to its start at its end
@@ -110,7 +113,7 @@
     };
     tick();
   });
-  $effect(() => () => { video.pause(); video.removeAttribute('src'); });
+  $effect(() => () => { if (loaded) clipView(loaded).t = frameTime; video.pause(); video.removeAttribute('src'); });
 
   // A seek takes a moment, and a drag on the timeline asks for many. Only the newest target counts, so the queue
   // skips targets that a later one replaced. A playing video keeps playing from the new place.
@@ -149,7 +152,7 @@
       await fixDuration(video);
       if (stale) return;
       loaded = id;
-      await seek(video, seekTimeFor(wanted?.t ?? 0));
+      await seek(video, seekTimeFor(wanted?.t ?? ui.clipViews[id]?.t ?? 0));
       frameTime = frameTimeAt(frames, video.currentTime);
       if (wanted?.sightingId) ui.sightingId = wanted.sightingId;
       if (wanted?.play) video.play();
@@ -321,7 +324,6 @@
   // keyboard shortcuts, never while an input has focus (plan section 10)
   // the magnifier: L locks it, Z changes its zoom, and Ctrl with the arrows moves a locked spot (Shift: 10 times)
   const ZOOMS = [4, 8, 16];
-  let magZoom = $state(8);
   function nudgeLens(dx: number, dy: number) {
     const c = lock ?? hover;
     if (c) lock = { x: c.x + dx, y: c.y + dy };
@@ -330,7 +332,7 @@
   function onkeydown(e: KeyboardEvent) {
     if ((e.target as HTMLElement).closest('input, select, textarea')) return;
     // Alt+X clears the repeated section, as in video editors
-    if (e.altKey && e.key.toLowerCase() === 'x') { e.preventDefault(); section = null; return; }
+    if (e.altKey && e.key.toLowerCase() === 'x') { e.preventDefault(); setSection(null); return; }
     if (e.altKey) return;
     const arrow = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] }[e.key.toLowerCase()];
     if ((e.ctrlKey || e.metaKey) && arrow) {
@@ -349,7 +351,7 @@
     else if (k === 'i') markImpact();
     else if (k === 'g') { e.preventDefault(); openGoTo(); }
     else if (k === 'l') lock = lock ? null : hover;
-    else if (k === 'z') magZoom = ZOOMS[(ZOOMS.indexOf(magZoom) + 1) % ZOOMS.length];
+    else if (k === 'z') ui.magZoom = ZOOMS[(ZOOMS.indexOf(ui.magZoom) + 1) % ZOOMS.length];
     else if (k === 'escape') { ui.tool = null; pending = null; }
   }
 
@@ -384,7 +386,7 @@
         <div class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-t border-line px-2 py-1.5">
           <div class="flex min-w-0 flex-wrap items-center gap-1.5">
             <div class="flex flex-wrap gap-px" role="group" aria-label="Playback speed">
-              {#each SPEEDS as sp}<button class="option min-h-0 px-1.5 py-1 text-[11px]" aria-pressed={speed === sp} onclick={() => (speed = sp)} title="Play at {sp}x speed">{sp}x</button>{/each}
+              {#each SPEEDS as sp}<button class="option min-h-0 px-1.5 py-1 text-[11px]" aria-pressed={ui.speed === sp} onclick={() => (ui.speed = sp)} title="Play at {sp}x speed">{sp}x</button>{/each}
             </div>
             {#if sighting}<span class="tag accent">Sighting on this frame</span>{/if}
           </div>
@@ -437,7 +439,7 @@
             <span class="inline-block h-2 w-[3px] bg-edge"></span>edges
           </span>
         </header>
-        <div class="max-h-[40vh] overflow-y-auto p-2"><Timeline {time} clipId={ui.clipId} {frames} ongo={go} bind:loop={section} /></div>
+        <div class="max-h-[40vh] overflow-y-auto p-2"><Timeline {time} clipId={ui.clipId} {frames} ongo={go} bind:loop={() => section, setSection} /></div>
       </section>
     </div>
 
@@ -446,7 +448,7 @@
         <Magnifier
           {video} {frame} center={lock ?? hover} locked={!!lock} {sighting} {pending} onpoint={place} ondrag={drag}
           onlock={() => (lock = lock ? null : hover)}
-          onnudge={nudgeLens} bind:zoom={magZoom}
+          onnudge={nudgeLens} bind:zoom={ui.magZoom}
         />
       </section>
       <section class="card flex min-h-[260px] flex-1 flex-col">

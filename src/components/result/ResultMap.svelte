@@ -12,7 +12,7 @@
   import MapStyle from '../MapStyle.svelte';
   import { Maximize2 } from '@lucide/svelte';
   import MapChooser from '../MapChooser.svelte';
-  import { project } from '../../lib/state/project.svelte.ts';
+  import { project, ui } from '../../lib/state/project.svelte.ts';
 
   let { result, map }: { result: ProjectResult; map?: MapId } = $props();
 
@@ -25,8 +25,6 @@
   let width = $state(0), height = $state(0);
   const D2R = Math.PI / 180;
 
-  // the terrain layers, which the stack at the bottom left switches on and off
-  let layers = $state({ steep: true, out: true, high: true });
 
   /** A grid as an image, one pixel per cell, made once per grid and layer. */
   type Color = (v: number) => [number, number, number, number] | null;
@@ -49,7 +47,7 @@
   const OUT_COLOR: Color = (v) => (v === REACH.safe ? [40, 170, 80, 110] : null);
   const HIGH_COLOR: Color = (v) => (v === REACH.high ? [235, 190, 40, 95] : null);
   const STEEP_COLOR: Color = (v) => (v !== 255 && v > STEEP_DEG ? [140, 25, 25, 120] : null);
-  const LAYERS: { key: keyof typeof layers; label: string; swatch: string; tip: string }[] = [
+  const LAYERS: { key: keyof typeof ui.layers; label: string; swatch: string; tip: string }[] = [
     { key: 'steep', label: 'Steep ground', swatch: 'rgb(140,25,25)', tip: `Ground steeper than ${STEEP_DEG} deg, where a gun vehicle is unlikely to stand. Hollow dots are Monte Carlo guns on such ground.` },
     { key: 'out', label: 'Out of reach', swatch: 'rgb(40,170,80)', tip: 'Ground no shell of the gun can land on, from the terrain only (no buildings or trees).' },
     { key: 'high', label: 'High arc only', swatch: 'rgb(235,190,40)', tip: 'Ground only the high arc of the gun lands on, with a long flight time.' },
@@ -58,8 +56,6 @@
   // only the layers the result has: steep ground needs terrain, the reach layers need the second worker message
   const shownLayers = $derived(LAYERS.filter((l) => (l.key === 'steep' ? result.shots.some((r) => r.slope) : !!result.safe)));
 
-  // the view in meters: center and span across the shorter side. Null follows the result.
-  let manual = $state<{ cx: number; cy: number; span: number } | null>(null);
   let shown = { cx: 0, cy: 0, sc: 1 }; // the view of the last drawing, for the pointer
   const toMeters = (e: MouseEvent) => {
     const r = canvas.getBoundingClientRect();
@@ -72,7 +68,7 @@
       const span = Math.max(100, Math.min(40000, (Math.min(width, height) / shown.sc) * k));
       const sc = Math.min(width, height) / span, r = canvas.getBoundingClientRect();
       // the point under the pointer stays under it
-      manual = { span, cx: p.x - (e.clientX - r.left - width / 2) / sc, cy: p.y + (e.clientY - r.top - height / 2) / sc };
+      ui.resultView = { span, cx: p.x - (e.clientX - r.left - width / 2) / sc, cy: p.y + (e.clientY - r.top - height / 2) / sc };
     };
     el.addEventListener('wheel', on, { passive: false });
     return () => el.removeEventListener('wheel', on);
@@ -86,7 +82,7 @@
   function move(e: PointerEvent) {
     if (!drag) return;
     const span = Math.min(width, height) / shown.sc;
-    manual = { span, cx: drag.cx - (e.clientX - drag.x) / shown.sc, cy: drag.cy + (e.clientY - drag.y) / shown.sc };
+    ui.resultView = { span, cx: drag.cx - (e.clientX - drag.x) / shown.sc, cy: drag.cy + (e.clientY - drag.y) / shown.sc };
   }
 
   $effect(() => {
@@ -123,7 +119,7 @@
       cx: (Math.min(...xs) + Math.max(...xs)) / 2, cy: (Math.min(...ys) + Math.max(...ys)) / 2,
       span: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 800) * 1.25,
     };
-    const { cx, cy, span } = manual ?? auto;
+    const { cx, cy, span } = ui.resultView ?? auto;
     const sc = Math.min(W, H) / span;
     shown = { cx, cy, sc };
     const T = (x: number, y: number): [number, number] => [W / 2 + (x - cx) * sc, H / 2 - (y - cy) * sc];
@@ -151,9 +147,9 @@
       g.drawImage(gridImage(grid, color), x, y, grid.w * grid.cell * sc, grid.h * grid.cell * sc);
       g.imageSmoothingEnabled = true;
     };
-    if (layers.out && result.safe) drawGrid(result.safe.grid, OUT_COLOR);
-    if (layers.high && result.safe) drawGrid(result.safe.grid, HIGH_COLOR);
-    if (layers.steep) for (const r of result.shots) if (r.slope) drawGrid(r.slope, STEEP_COLOR);
+    if (ui.layers.out && result.safe) drawGrid(result.safe.grid, OUT_COLOR);
+    if (ui.layers.high && result.safe) drawGrid(result.safe.grid, HIGH_COLOR);
+    if (ui.layers.steep) for (const r of result.shots) if (r.slope) drawGrid(r.slope, STEEP_COLOR);
 
     const gun = css('--gun');
 
@@ -257,7 +253,7 @@
     <span><span class="mr-1 inline-block w-4 border-t-2 border-dashed border-gun align-middle"></span>Weapon range from the gun</span>
     {#if zoom}<span>Zoom {zoom}</span>{/if}
   </div>
-  <button class="btn sm absolute left-2 top-2" onclick={() => (manual = null)} disabled={!manual} title="Show the whole result"><Maximize2 size={12} /> Fit</button>
+  <button class="btn sm absolute left-2 top-2" onclick={() => (ui.resultView = null)} disabled={!ui.resultView} title="Show the whole result"><Maximize2 size={12} /> Fit</button>
   <div class="absolute bottom-2 right-2"><MapStyle /></div>
   {#if map}
     <div class="absolute bottom-2 left-2 flex w-36 flex-col gap-1">
@@ -265,8 +261,8 @@
       {#if shownLayers.length}
         <div class="flex flex-col gap-px border border-line bg-panel p-px" role="group" aria-label="Terrain layers">
           {#each shownLayers as l (l.key)}
-            <button class="option min-h-0 w-full justify-start gap-1.5 px-1.5 py-1 text-[11px]" aria-pressed={layers[l.key]} title={l.tip} onclick={() => (layers[l.key] = !layers[l.key])}>
-              <span class="inline-block h-2.5 w-2.5 shrink-0 {layers[l.key] ? '' : 'opacity-30'}" style="background:{l.swatch}"></span>{l.label}
+            <button class="option min-h-0 w-full justify-start gap-1.5 px-1.5 py-1 text-[11px]" aria-pressed={ui.layers[l.key]} title={l.tip} onclick={() => (ui.layers[l.key] = !ui.layers[l.key])}>
+              <span class="inline-block h-2.5 w-2.5 shrink-0 {ui.layers[l.key] ? '' : 'opacity-30'}" style="background:{l.swatch}"></span>{l.label}
             </button>
           {/each}
         </div>

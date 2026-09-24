@@ -1,10 +1,10 @@
 <script module lang="ts">
-  // module scope, so folded sightings stay folded across phase changes
-  const folded: Record<string, boolean> = $state({});
+  import { ui } from '../../lib/state/project.svelte.ts';
+  // folded sightings live in the UI state, so they stay folded across phase changes and reloads
   /** Whether every one of these sightings is folded, and folding or opening them all. */
-  export const allFolded = (ids: string[]) => ids.length > 0 && ids.every((id) => folded[id]);
+  export const allFolded = (ids: string[]) => ids.length > 0 && ids.every((id) => ui.folded[id]);
   export function foldAll(ids: string[], fold: boolean) {
-    for (const id of ids) folded[id] = fold;
+    for (const id of ids) ui.folded[id] = fold;
   }
 </script>
 
@@ -19,7 +19,7 @@
   import { motionFlags, motionWarning, shellSpeeds } from '../../lib/solver/motion.ts';
   import { lacks } from '../../lib/state/missing.ts';
   import { forLater } from './draw.ts';
-  import { clips, currentShot, deleteSighting, project, ui } from '../../lib/state/project.svelte.ts';
+  import { clips, currentShot, deleteSighting, project } from '../../lib/state/project.svelte.ts';
   import type { Id } from '../../lib/solver/types.ts';
 
   let { ongo }: { ongo: (clipId: Id, t: number, sightingId?: Id) => void } = $props();
@@ -38,7 +38,6 @@
   const jumpsOf = (id: Id) => jumps.filter((f) => f.to === id).map(motionWarning);
   const speeds = $derived(shellSpeeds($state.snapshot(project), solver));
   // the sightings whose position map is open
-  const posMap: Record<Id, boolean> = $state({});
   const round = (v: number | undefined) => (v == null ? undefined : Math.round(v * 100) / 100);
   // the user enters the crater in phase 3, so its absence is no problem here
   const needsCoords = forLater;
@@ -68,11 +67,11 @@
       {@attach (el) => { if (selected) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }}
     >
       <div class="flex items-center gap-2">
-        <button class="text-muted hover:text-text" aria-label={folded[s.id] ? 'Expand' : 'Collapse'} aria-expanded={!folded[s.id]} onclick={() => (folded[s.id] = !folded[s.id])}>
-          {#if folded[s.id]}<ChevronRight size={14} />{:else}<ChevronDown size={14} />{/if}
+        <button class="text-muted hover:text-text" aria-label={ui.folded[s.id] ? 'Expand' : 'Collapse'} aria-expanded={!ui.folded[s.id]} onclick={() => (ui.folded[s.id] = !ui.folded[s.id])}>
+          {#if ui.folded[s.id]}<ChevronRight size={14} />{:else}<ChevronDown size={14} />{/if}
         </button>
         <button class="card-title text-[11px] hover:text-accent" onclick={() => ongo(s.clipId, s.timeS, s.id)}>Sighting {i + 1}</button>
-        {#if folded[s.id]}
+        {#if ui.folded[s.id]}
           <span class="num min-w-0 truncate text-[11.5px] text-muted">{timecode(s.timeS)}{a.ok ? `, el ${deg(a.el)}` : ''}</span>
           {#if bad}<span class="tag warn px-1 py-0" title={[...(!r.ok ? [r.error] : []), ...r.warnings, ...jump].join('\n')}>!</span>{/if}
         {/if}
@@ -82,7 +81,7 @@
         <UseToggle target={s} what="this sighting" />
         <button class="text-muted hover:text-bad" aria-label="Delete sighting" onclick={() => deleteSighting(s.id)}><Trash2 size={13} /></button>
       </div>
-      {#if !folded[s.id]}
+      {#if !ui.folded[s.id]}
       <dl class="dl mt-1.5 text-[12px]">
         <dt>Clip</dt><dd class="truncate" title={clipName(s.clipId)}>{clipName(s.clipId)}</dd>
         <dt>Time</dt>
@@ -109,11 +108,11 @@
       <div class="mt-1.5 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-1.5" title="Where you stood on this frame, from the minimap. Optional: without it, the solver estimates the spot near the crater.">
         <NumInput label="Your X (optional)" step={0.01} placeholder={copied ? String(copied.x) : 'minimap'} bind:value={() => s.position?.x, (v) => (s.position = { ...s.position, x: round(v) })} />
         <NumInput label="Your Y (optional)" step={0.01} placeholder={copied ? String(copied.y) : 'minimap'} bind:value={() => s.position?.y, (v) => (s.position = { ...s.position, y: round(v) })} />
-        <button class="option h-[30px] justify-center px-2 text-[11px]" aria-pressed={!!posMap[s.id]} onclick={() => (posMap[s.id] = !posMap[s.id])} title="Pick where you stood on the map">Map</button>
+        <button class="option h-[30px] justify-center px-2 text-[11px]" aria-pressed={!!ui.mapOpen[s.id]} onclick={() => (ui.mapOpen[s.id] = !ui.mapOpen[s.id])} title="Pick where you stood on the map">Map</button>
       </div>
-      {#if posMap[s.id]}
+      {#if ui.mapOpen[s.id]}
         <div class="mt-1.5">
-          <CraterMap shot={shot} reachM={project.settings.rangeMaxM} map={project.settings.map} observer={s.position ?? copied} onpick={(q) => (s.position = q)} />
+          <CraterMap viewId={s.id} shot={shot} reachM={project.settings.rangeMaxM} map={project.settings.map} observer={s.position ?? copied} onpick={(q) => (s.position = q)} />
         </div>
       {/if}
       <label class="mt-2 flex items-start gap-1.5 text-copy" title="Use the camera of the previous sighting in this clip, when the view did not move">

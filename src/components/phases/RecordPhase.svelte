@@ -2,11 +2,26 @@
   import { importClip } from '../../lib/capture/importClip.ts';
   import { RollingRecorder } from '../../lib/capture/rollingRecorder.ts';
   import { saveClip } from '../../lib/state/persistence.ts';
-  import { clips, fixShot, project, ui } from '../../lib/state/project.svelte.ts';
+  import { CAPTURE_FPS, clips, fixShot, project, ui } from '../../lib/state/project.svelte.ts';
   import type { Clip } from '../../lib/solver/types.ts';
 
   // module scope keeps the buffer recording while the user is in another phase
   const status = $state({ active: false, seconds: 0, note: '', error: '' });
+
+  // capture test (docs/capture-test-plan.md), for example ?codec=vp8&res=1920x1080&fps=30&hint=detail
+  const q = new URLSearchParams(location.search);
+  const CODECS: Record<string, string> = {
+    vp8: 'video/webm;codecs=vp8', vp9: 'video/webm;codecs=vp9', av1: 'video/webm;codecs=av01', h264: 'video/mp4;codecs=avc1',
+  };
+  const [testW, testH] = (q.get('res') ?? '').split('x').map(Number);
+  const captureTest = {
+    fps: Number(q.get('fps')) || CAPTURE_FPS,
+    mime: CODECS[q.get('codec') ?? ''],
+    width: testW || undefined, height: testH || undefined,
+    hint: q.get('hint') ?? undefined,
+    /** The settings for the clip name, empty outside a test. */
+    label: ['codec', 'res', 'fps', 'hint'].filter((k) => q.has(k)).map((k) => `${k}=${q.get(k)}`).join(' '),
+  };
 
   async function add(clip: Clip) {
     await saveClip(clip);
@@ -22,7 +37,8 @@
     onError: (m) => (status.error = m),
     onClip: (blob, s) => {
       const n = clips.list.filter((c) => c.source === 'buffer').length + 1;
-      importClip(blob, `Clip ${n} (${s} s)`, 'buffer')
+      const test = captureTest.label && ` ${captureTest.label} rate=${project.settings.bitrateMbps}M`;
+      importClip(blob, `Clip ${n} (${s} s)${test}`, 'buffer')
         .then(add)
         .then(fixShot)
         .then(() => (status.note = 'Clip saved.'))
@@ -38,7 +54,7 @@
   import Spinner from '../Spinner.svelte';
   import { canCapture } from '../../lib/capture/rollingRecorder.ts';
   import { deleteClip, dropClipUrl, renameClip } from '../../lib/state/persistence.ts';
-  import { CAPTURE_FPS, forgetClip, newShot, uid } from '../../lib/state/project.svelte.ts';
+  import { forgetClip, newShot, uid } from '../../lib/state/project.svelte.ts';
   import { forgetStrip } from '../mark/Timeline.svelte';
   import { clipThumb, forgetThumb } from '../../lib/video/clipThumbs.svelte.ts';
   import { clearHistory } from '../../lib/state/history.svelte.ts';
@@ -58,7 +74,7 @@
     starting = true;
     status.error = status.note = '';
     try {
-      await rec.start(CAPTURE_FPS);
+      await rec.start(captureTest.fps, captureTest);
     } catch (e) {
       const err = e as Error;
       status.error = err.name === 'NotAllowedError'
@@ -167,10 +183,11 @@
             {#if status.active}
               <button class="btn" onclick={() => rec.stop()} data-testid="rec-stop"><Square size={13} /> Stop</button>
             {:else}
-              <button class="btn primary" onclick={start} data-testid="rec-start" title="Share the game window. The app keeps the last {st.bufferS} s."><Circle size={13} /> Record</button>
+              <button class="btn primary" onclick={start} data-testid="rec-start" title="Share the entire screen. The app keeps the last {st.bufferS} s."><Circle size={13} /> Record</button>
             {/if}
             <button class="btn" disabled={!status.active} onclick={saveBuffer} data-testid="rec-save" title="After a shell lands, save the last {st.bufferS} s. Saving and stopping both end the screen share."><Save size={13} /> Save clip</button>
           </div>
+          <p class="text-muted">Share the entire screen, not the game window. A game window records only about 10 frames per second.</p>
           <div class="grid grid-cols-2 gap-2">
             <NumInput required label="Keep last" unit="s" min={5} step={1} bind:value={() => st.bufferS, (v) => (st.bufferS = Math.max(5, v!))} testid="buffer-s" />
             <NumInput required label="Quality" unit="Mbit/s" min={1} step={1} bind:value={() => st.bitrateMbps, (v) => (st.bitrateMbps = Math.max(1, v!))} />

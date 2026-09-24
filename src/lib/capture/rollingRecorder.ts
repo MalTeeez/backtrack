@@ -48,12 +48,17 @@ export class RollingRecorder {
   /** The next recorder start uses the new value. */
   set bitrateMbps(n: number) { this.o.bitrateMbps = n; }
 
-  async start(fps: number) {
+  /** `mime`, the size and `hint` are for the capture test (docs/capture-test-plan.md). */
+  async start(fps: number, test: { mime?: string; width?: number; height?: number; hint?: string } = {}) {
     if (!canCapture()) throw new Error('This browser cannot record the screen. Upload a clip instead.');
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: fps } }, audio: false });
+    if (test.mime && !MediaRecorder.isTypeSupported(test.mime)) throw new Error(`This browser cannot record ${test.mime}.`);
+    const size = test.width ? { width: { ideal: test.width }, height: { ideal: test.height } } : {};
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: fps }, displaySurface: 'monitor', ...size } as MediaTrackConstraints, audio: false });
     this.stream = stream;
-    this.mime = pickMime();
-    stream.getVideoTracks()[0]?.addEventListener('ended', () => this.stop());
+    this.mime = test.mime || pickMime();
+    const track = stream.getVideoTracks()[0];
+    if (track && test.hint) track.contentHint = test.hint;
+    track?.addEventListener('ended', () => this.stop());
     this.startSlot(0);
     this.o.onStatus();
   }

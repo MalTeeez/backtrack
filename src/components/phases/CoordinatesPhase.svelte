@@ -15,7 +15,6 @@
   const clipName = $derived(clips.list.find((c) => c.id === ui.clipId)?.name);
   const count = (id: Id) => project.sightings.filter((s) => s.shotId === id).length;
   // the crater map is open for these shots
-  const onMap: Record<Id, boolean> = $state({});
 
   /** Switches a crater between X and Y and a rangefinder reading, and keeps where it was as X and Y. */
   function setRangefinder(s: Shot, on: boolean) {
@@ -47,7 +46,7 @@
           <div class="flex flex-col gap-1.5 border-b border-line pb-3 last:border-b-0 last:pb-0">
             <div class="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-end gap-1.5">
               <label class="flex min-w-0 flex-col gap-1"><span class="label truncate">Shot ({count(s.id)} sightings)</span><input class="control" bind:value={s.name} /></label>
-              <button class="option justify-center px-2" aria-pressed={!!onMap[s.id]} onclick={() => (onMap[s.id] = !onMap[s.id])}>Map</button>
+              <button class="option justify-center px-2" aria-pressed={!!ui.mapOpen[s.id]} onclick={() => (ui.mapOpen[s.id] = !ui.mapOpen[s.id])}>Map</button>
               <span class="grid h-[30px] place-items-center px-1"><UseToggle target={s} what="this shot" /></span>
               <button class="btn icon" aria-label="Delete {s.name}" onclick={() => deleteShot(s.id)}><Trash2 size={13} /></button>
             </div>
@@ -74,7 +73,7 @@
               <NumInput label="Suspected heading" unit="deg" bind:value={s.sourceDeg} step={1} min={0} />
               <NumInput label="Tolerance" unit="deg" bind:value={() => s.sourceTolDeg ?? SOURCE_TOL_DEG, (v) => (s.sourceTolDeg = v)} step={1} min={1} />
             </div>
-            {#if onMap[s.id]}<CraterMap shot={s} reachM={st.rangeMaxM} map={st.map} />{/if}
+            {#if ui.mapOpen[s.id]}<CraterMap viewId={s.id} shot={s} reachM={st.rangeMaxM} map={st.map} />{/if}
           </div>
         {/each}
       </div>

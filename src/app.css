@@ -2,6 +2,7 @@
    Body text is mono, small text is VG5000, and big and header text is Archivo Black.
    The dark theme is the default. The light theme applies when the user or the system selects it. */
 @import 'tailwindcss';
+@source not '../test-data';
 
 @import '@fontsource/commit-mono/400.css';
 @import '@fontsource/commit-mono/700.css';

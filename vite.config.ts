@@ -37,6 +37,7 @@ function localData(): Plugin {
 export default defineConfig({
   base,
   plugins: [svelte(), tailwindcss(), localData()],
-  server: { port: 5175, open: false },
+  // test-data/ holds clips and the capture test load log, which changes every second
+  server: { port: 5175, open: false, watch: { ignored: ['**/test-data/**'] } },
   build: { target: 'es2022' },
 });

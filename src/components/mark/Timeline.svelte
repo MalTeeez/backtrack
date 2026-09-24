@@ -65,7 +65,7 @@
    * button or Alt+X clears it.
    */
   import { Flame, Maximize2, Plus, Repeat, X, ZoomIn, ZoomOut } from '@lucide/svelte';
-  import { addShot, clips, project, shotsOf, ui } from '../../lib/state/project.svelte.ts';
+  import { addShot, clips, clipView, project, shotsOf, ui } from '../../lib/state/project.svelte.ts';
   import { untrack } from 'svelte';
   import { frameIndexAt, frameTimeAt } from '../../lib/video/frames.ts';
   import { lacks } from '../../lib/state/missing.ts';
@@ -83,9 +83,9 @@
   const d = $derived(clip?.durationS || 1);
   $effect(() => { if (clipId) strip(clipId, d); });
 
-  // the visible part of the clip, in seconds. A new clip shows all of it.
+  // the visible part of the clip, in seconds. A clip opens on the part last seen, or all of it.
   let view = $state({ a: 0, b: 1 });
-  $effect(() => { void clipId; view = { a: 0, b: d }; });
+  $effect(() => { const id = clipId, all = { a: 0, b: d }; view = untrack(() => (id && ui.clipViews[id]?.zoom) || all); });
   const span = $derived(view.b - view.a);
   const zoomed = $derived(span < d - 1e-6);
   let width = $state(0);
@@ -99,6 +99,7 @@
     const s = Math.max(MIN_SPAN, Math.min(d, b - a));
     a = Math.max(0, Math.min(d - s, a));
     view = { a, b: a + s };
+    if (clipId) clipView(clipId).zoom = s < d - 1e-6 ? { ...view } : undefined;
   }
   const zoomAt = (t: number, k: number) => setView(t - (t - view.a) * k, t + (view.b - t) * k);
 

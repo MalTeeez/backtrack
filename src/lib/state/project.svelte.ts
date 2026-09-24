@@ -9,7 +9,7 @@ export { WEAPONS };
 export const DEFAULT_SETTINGS: Settings = {
   fovDeg: 90, fovAxis: 'h',
   weapon: 'L52', rangeMinM: WEAPONS.L52.min, rangeMaxM: WEAPONS.L52.max, limitToRange: true,
-  bufferS: 40, bitrateMbps: 10,
+  bufferS: 40, bitrateMbps: 25,
   markSigmaPx: 1, compassSigmaDeg: 0.5,
 };
 
@@ -37,8 +37,29 @@ export interface Ui {
   tool: Tool;
   /** Shows the result next to the Mark and Coordinates phases. */
   split: boolean;
+  /** Per clip, where the Mark phase left it. */
+  clipViews: Record<Id, ClipView>;
+  speed: number;
+  magZoom: number;
+  /** Sightings folded in the list. */
+  folded: Record<Id, boolean>;
+  /** The result map: its view (null follows the result) and its terrain layers. */
+  resultView: MapView | null;
+  layers: { steep: boolean; out: boolean; high: boolean };
+  /** The map panels by shot (crater) or sighting (where the user stood): open or not, and their view. */
+  mapOpen: Record<Id, boolean>;
+  mapViews: Record<Id, MapView>;
 }
-export const ui: Ui = $state({ phase: 'record', shotId: null, clipId: null, sightingId: null, tool: null, split: false });
+type Span = { a: number; b: number };
+export type MapView = { cx: number; cy: number; span: number };
+/** The frame on screen, the visible part of the timeline, and the section playback repeats. */
+export type ClipView = { t?: number; zoom?: Span; loop?: Span };
+export const ui: Ui = $state({
+  phase: 'record', shotId: null, clipId: null, sightingId: null, tool: null, split: false,
+  clipViews: {}, speed: 1, magZoom: 8, folded: {}, resultView: null, layers: { steep: true, out: true, high: true }, mapOpen: {}, mapViews: {},
+});
+/** The view of a clip, made on first use. Not for use inside $derived, which may not change state. */
+export const clipView = (id: Id): ClipView => (ui.clipViews[id] ??= {});
 
 /** Saved clips, newest first. The video blobs stay in IndexedDB (see persistence.ts). */
 export const clips: { list: ClipMeta[] } = $state({ list: [] });
@@ -107,11 +128,16 @@ export function loadProject(data: ProjectData, saved?: Partial<Ui>) {
 export function deleteShot(id: Id) {
   project.sightings = project.sightings.filter((s) => s.shotId !== id);
   project.shots = project.shots.filter((s) => s.id !== id);
+  delete ui.mapOpen[id];
+  delete ui.mapViews[id];
   fixShot();
 }
 export function deleteSighting(id: Id) {
   project.sightings = project.sightings.filter((s) => s.id !== id);
   if (ui.sightingId === id) ui.sightingId = null;
+  delete ui.folded[id];
+  delete ui.mapOpen[id];
+  delete ui.mapViews[id];
 }
 /** Deletes a clip with its sightings, impact marks and shots. */
 export function forgetClip(id: Id) {
@@ -120,6 +146,7 @@ export function forgetClip(id: Id) {
   project.shots = project.shots.filter((s) => s.clipId !== id);
   clips.list = clips.list.filter((c) => c.id !== id);
   if (ui.clipId === id) ui.clipId = clips.list[0]?.id ?? null;
+  delete ui.clipViews[id];
   fixShot();
 }
 
