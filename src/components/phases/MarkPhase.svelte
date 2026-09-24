@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Flame, Pause, Play, Plus, SkipBack, SkipForward } from '@lucide/svelte';
   import Spinner from '../Spinner.svelte';
   import Key from '../Key.svelte';
@@ -12,7 +13,7 @@
   import { shellSpeeds } from '../../lib/solver/motion.ts';
   import { readVideoCompass, readVideoCompassRaw } from '../../lib/video/compassRead.ts';
   import { MIN_CORR, MIN_MARGIN } from '../../lib/video/compass.ts';
-  import { clips, currentShot, newShot, project, sameFrame, sightingAt, uid, ui } from '../../lib/state/project.svelte.ts';
+  import { addShot, clips, currentShot, fixShot, project, sameFrame, shotsOf, sightingAt, uid, ui } from '../../lib/state/project.svelte.ts';
   import { clipFrames, clipUrl } from '../../lib/state/persistence.ts';
   import { frameIndexAt, frameTimeAt, seekTimeFor } from '../../lib/video/frames.ts';
   import type { Id, Pt, Sighting } from '../../lib/solver/types.ts';
@@ -135,6 +136,7 @@
     if (!id || id === loaded) return;
     let stale = false;
     loadError = '';
+    lock = null; // a locked magnifier spot belongs to the clip before
     (async () => {
       // the frame list comes first: preparing an older clip replaces its video
       const list = await clipFrames(id);
@@ -216,7 +218,8 @@
 
   /** Returns the sighting on this frame, and makes one if there is none yet. */
   function here(): Sighting | null {
-    if (!loaded) return null;
+    // the video on screen may still be the clip before a switch: marks go only to a shot of that clip
+    if (!loaded || shot.clipId !== loaded) return null;
     const found = sightingAt(loaded, frameTime);
     if (found) return found;
     project.sightings.push({
@@ -297,7 +300,7 @@
   }
 
   function markImpact() {
-    if (!loaded) return;
+    if (!loaded || shot.clipId !== loaded) return;
     const t = shot.impactTimeS[loaded];
     if (t != null && sameFrame(t, frameTime)) delete shot.impactTimeS[loaded];
     else shot.impactTimeS[loaded] = frameTime;
@@ -308,11 +311,12 @@
     sighting.edges = [];
     pending = null;
   }
-  function addShot() {
-    const s = newShot(project.shots.length + 1);
-    project.shots.push(s);
-    ui.shotId = s.id;
-  }
+  // a clip shows only its own shots, so a switch to another clip also switches to one of its shots, or to a new one
+  const clipShots = $derived(shotsOf(ui.clipId));
+  $effect(() => {
+    void ui.clipId;
+    untrack(fixShot);
+  });
 
   // keyboard shortcuts, never while an input has focus (plan section 10)
   // the magnifier: L locks it, Z changes its zoom, and Ctrl with the arrows moves a locked spot (Shift: 10 times)
@@ -433,7 +437,7 @@
             <span class="inline-block h-2 w-[3px] bg-edge"></span>edges
           </span>
         </header>
-        <div class="max-h-[40vh] overflow-y-auto p-2"><Timeline {time} clipId={loaded ?? ui.clipId} {frames} ongo={go} bind:loop={section} /></div>
+        <div class="max-h-[40vh] overflow-y-auto p-2"><Timeline {time} clipId={ui.clipId} {frames} ongo={go} bind:loop={section} /></div>
       </section>
     </div>
 
@@ -455,7 +459,7 @@
             </button>
           {/if}
           <select class="control {shotSightings.length ? '' : 'ml-auto'} w-auto min-w-0 max-w-[45%]" bind:value={ui.shotId} aria-label="Shot" data-testid="shot-select">
-            {#each project.shots as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
+            {#each project.shots.filter((s) => s.id === shot.id || clipShots.includes(s)) as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
           </select>
           <button class="btn icon sm" onclick={addShot} title="New shot: one shell and one crater" aria-label="New shot"><Plus size={13} /></button>
         </header>

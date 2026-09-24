@@ -1,10 +1,10 @@
 /** Project data and UI state (runes). App.svelte saves both to IndexedDB (see persistence.ts). */
 import type { ClipMeta, Id, ProjectData, Settings, Shot, Sighting, Weapon } from '../solver/types.ts';
+import { freeShot, oneClipPerShot } from '../capture/annotation.ts';
+import { sameFrame } from '../video/frames.ts';
 
-export const WEAPONS: Record<Weapon, { name: string; min: number; max: number }> = {
-  L52: { name: 'L52 cannon', min: 600, max: 2600 },
-  L81: { name: 'L81 mortar', min: 80, max: 684 },
-};
+import { WEAPONS } from '../solver/ballistics.ts';
+export { WEAPONS };
 
 export const DEFAULT_SETTINGS: Settings = {
   fovDeg: 90, fovAxis: 'h',
@@ -45,6 +45,38 @@ export const clips: { list: ClipMeta[] } = $state({ list: [] });
 
 export const currentShot = (): Shot => project.shots.find((s) => s.id === ui.shotId) ?? project.shots[0];
 
+/** The shots of a clip. Without a clip, the new shots that no clip has taken yet. */
+export const shotsOf = (clipId: Id | null): Shot[] => project.shots.filter((s) => (s.clipId ?? null) === clipId);
+
+/** The project as the selected clip sees it: its shots and their sightings. The solver and the checks use it. */
+export function clipData(): ProjectData {
+  const ids = new Set(shotsOf(ui.clipId).map((s) => s.id));
+  return {
+    settings: project.settings,
+    shots: project.shots.filter((s) => ids.has(s.id)),
+    sightings: project.sightings.filter((s) => ids.has(s.shotId) && s.clipId === ui.clipId),
+  };
+}
+
+/** Adds a shot to the selected clip, numbered within it, and selects it. */
+export function addShot() {
+  project.shots.push({ ...newShot(shotsOf(ui.clipId).length + 1), clipId: ui.clipId ?? undefined });
+  ui.shotId = project.shots.at(-1)!.id;
+}
+
+/**
+ * Keeps the selected shot in the selected clip: else the first shot of the clip, a new shot that no clip has taken
+ * yet, or a new one.
+ */
+export function fixShot() {
+  const mine = shotsOf(ui.clipId);
+  if (mine.some((s) => s.id === ui.shotId)) return;
+  const free = ui.clipId ? project.shots.find((s) => freeShot(project, s)) : undefined;
+  if (mine.length) ui.shotId = mine[0].id;
+  else if (free) { free.clipId = ui.clipId!; ui.shotId = free.id; }
+  else addShot();
+}
+
 /** The shape of older saved projects: landmarks, positions, heights, spray and a custom weapon. */
 interface OldData {
   sightings?: (Sighting & { positionId?: Id; landmark?: unknown })[];
@@ -52,7 +84,10 @@ interface OldData {
   settings?: Partial<Settings> & { fps?: number };
 }
 
-/** Replaces the whole project, for example after loading. The UI state then points only at things that exist. */
+/**
+ * Replaces the whole project, for example after loading. The caller then sets the clip list and calls fixShot, so the
+ * UI state points only at things that exist.
+ */
 export function loadProject(data: ProjectData, saved?: Partial<Ui>) {
   const old = data as unknown as OldData;
   const { fps: _fps, ...settings } = { ...DEFAULT_SETTINGS, ...old.settings };
@@ -60,43 +95,37 @@ export function loadProject(data: ProjectData, saved?: Partial<Ui>) {
   const sightings = (old.sightings ?? []).map(({ landmark: _l, positionId: _p, ...s }) => s);
   const shots = (old.shots ?? []).map((s) => ({
     id: s.id, name: s.name, crater: { x: s.crater?.x, y: s.crater?.y, from: s.crater?.from }, impactTimeS: s.impactTimeS ?? {},
-    sourceDeg: s.sourceDeg, sourceTolDeg: s.sourceTolDeg, excluded: s.excluded,
+    sourceDeg: s.sourceDeg, sourceTolDeg: s.sourceTolDeg, excluded: s.excluded, clipId: s.clipId,
   }));
   Object.assign(project, { settings, shots, sightings });
-  if (!project.shots.length) project.shots.push(newShot(1));
+  oneClipPerShot(project, { uid });
   const { landmarkId: _, ...rest } = (saved ?? {}) as Partial<Ui> & { landmarkId?: unknown };
   Object.assign(ui, rest, { tool: null });
-  if (!project.shots.some((s) => s.id === ui.shotId)) ui.shotId = project.shots[0].id;
 }
 
 /** These delete a thing and everything that points at it. */
 export function deleteShot(id: Id) {
   project.sightings = project.sightings.filter((s) => s.shotId !== id);
   project.shots = project.shots.filter((s) => s.id !== id);
-  if (!project.shots.length) project.shots.push(newShot(1));
-  if (ui.shotId === id) ui.shotId = project.shots[0].id;
+  fixShot();
 }
 export function deleteSighting(id: Id) {
   project.sightings = project.sightings.filter((s) => s.id !== id);
   if (ui.sightingId === id) ui.sightingId = null;
 }
-/** Deletes a clip with its sightings and impact marks. */
+/** Deletes a clip with its sightings, impact marks and shots. */
 export function forgetClip(id: Id) {
   project.sightings = project.sightings.filter((s) => s.clipId !== id);
   for (const s of project.shots) delete s.impactTimeS[id];
+  project.shots = project.shots.filter((s) => s.clipId !== id);
   clips.list = clips.list.filter((c) => c.id !== id);
   if (ui.clipId === id) ui.clipId = clips.list[0]?.id ?? null;
+  fixShot();
 }
 
-/**
- * How close two times must be to count as the same frame. Sightings store the presentation time of their frame, so
- * this only has to be smaller than half the shortest frame interval (4 ms is half a frame at 120 fps).
- */
-const SAME_FRAME_S = 0.004;
+export { sameFrame };
 
 /** The sighting of the current shot on the frame at time t of this clip, if there is one. */
 export function sightingAt(clipId: Id, t: number): Sighting | undefined {
-  return project.sightings.find((s) => s.shotId === currentShot().id && s.clipId === clipId && Math.abs(s.timeS - t) < SAME_FRAME_S);
+  return project.sightings.find((s) => s.shotId === currentShot().id && s.clipId === clipId && sameFrame(s.timeS, t));
 }
-/** True when both times belong to the same frame. */
-export const sameFrame = (a: number, b: number) => Math.abs(a - b) < SAME_FRAME_S;

@@ -4,14 +4,20 @@
   import ResultMap from '../result/ResultMap.svelte';
   import ShotResult from '../result/ShotResult.svelte';
   import CopyButton from '../result/CopyButton.svelte';
-  import { project } from '../../lib/state/project.svelte.ts';
+  import { clipData, project } from '../../lib/state/project.svelte.ts';
   import { solve, solved } from '../../lib/state/solve.svelte.ts';
 
   let { compact = false }: { compact?: boolean } = $props();
 
-  // the store solves again only when the inputs of the solver changed
-  $effect(() => solve($state.snapshot(project)));
-  const result = $derived(solved.result);
+  // only the shots of the clip picked in Mark, as a shot belongs to one clip for now. The store solves again only when
+  // the inputs of the solver changed.
+  $effect(() => solve($state.snapshot(clipData())));
+  // a result of another clip, while the solve of this one runs, shows as no result
+  const result = $derived.by(() => {
+    const d = clipData(), ids = new Set(d.shots.map((s) => s.id)), r = solved.result;
+    // an empty result fits only a clip without sightings
+    return r && r.shots.every((x) => ids.has(x.shotId)) && (r.shots.length || !d.sightings.length) ? r : null;
+  });
   const solving = $derived(solved.solving);
   const error = $derived(solved.error);
 

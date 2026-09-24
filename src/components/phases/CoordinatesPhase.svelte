@@ -6,10 +6,13 @@
   import CraterMap from '../CraterMap.svelte';
   import { MAPS } from '../../lib/map/tiles.svelte.ts';
   import { SOURCE_TOL_DEG, craterGame } from '../../lib/solver/sightings.ts';
-  import { deleteShot, newShot, project, WEAPONS } from '../../lib/state/project.svelte.ts';
+  import { addShot, clips, deleteShot, project, shotsOf, ui, WEAPONS } from '../../lib/state/project.svelte.ts';
   import type { Id, MapId, Shot, Weapon } from '../../lib/solver/types.ts';
 
   const st = $derived(project.settings);
+  // the shots of the clip picked in Mark: a shot belongs to one clip for now
+  const shown = $derived(shotsOf(ui.clipId));
+  const clipName = $derived(clips.list.find((c) => c.id === ui.clipId)?.name);
   const count = (id: Id) => project.sightings.filter((s) => s.shotId === id).length;
   // the crater map is open for these shots
   const onMap: Record<Id, boolean> = $state({});
@@ -31,16 +34,16 @@
   <div class="flex flex-col gap-2">
     <section class="card">
       <header class="card-head">
-        <h2 class="card-title">Craters</h2>
+        <h2 class="card-title">Craters{clipName ? ` of ${clipName}` : ''}</h2>
         <Info label="Craters">
           <p>Walk to the crater after the impact and read its X and Y from the game map, or click it on the map. 1 unit is 100 m.</p>
           <p>You do not need to give your own position. You stood near the crater, and the solver finds where.</p>
           <p><em>Suspected heading</em> is the compass heading from the crater toward the gun, if you have an idea of it. The solver then looks only within the tolerance around it. Leave it empty to search all directions.</p>
         </Info>
-        <span class="card-meta"><button class="btn sm" onclick={() => project.shots.push(newShot(project.shots.length + 1))}><Plus size={12} /> Add</button></span>
+        <span class="card-meta"><button class="btn sm" onclick={addShot}><Plus size={12} /> Add</button></span>
       </header>
       <div class="card-body flex flex-col gap-3" data-testid="shots">
-        {#each project.shots as s (s.id)}
+        {#each shown as s (s.id)}
           <div class="flex flex-col gap-1.5 border-b border-line pb-3 last:border-b-0 last:pb-0">
             <div class="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-end gap-1.5">
               <label class="flex min-w-0 flex-col gap-1"><span class="label truncate">Shot ({count(s.id)} sightings)</span><input class="control" bind:value={s.name} /></label>

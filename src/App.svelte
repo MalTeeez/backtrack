@@ -9,7 +9,7 @@
   import ResultPhase from './components/phases/ResultPhase.svelte';
   import { missing, openPhases } from './lib/state/missing.ts';
   import { listClips, loadSaved, save } from './lib/state/persistence.ts';
-  import { clips, loadProject, project, ui, type Phase } from './lib/state/project.svelte.ts';
+  import { clipData, clips, fixShot, loadProject, project, ui, type Phase } from './lib/state/project.svelte.ts';
   import { cycleTheme, theme } from './lib/state/theme.svelte.ts';
 
   const PHASES: [Phase, string][] = [
@@ -18,7 +18,9 @@
     ['coordinates', 'Coordinates'],
     ['result', 'Result'],
   ];
-  const need = $derived(missing(project, clips.list));
+  // the checks and the counts see only the selected clip: a shot belongs to one clip for now
+  const clipView = $derived(clipData());
+  const need = $derived(missing(clipView, clips.list));
   const open = $derived(openPhases(need));
   // the result phase needs everything before it
   const needFor = $derived<Record<Phase, string[]>>({
@@ -52,8 +54,9 @@
       else loadProject($state.snapshot(project));
       clips.list = list;
       if (!list.some((c) => c.id === ui.clipId)) ui.clipId = list[0]?.id ?? null;
-      // reopen on the furthest phase the saved project can reach
-      const reach = openPhases(missing(project, list));
+      fixShot();
+      // reopen on the furthest phase the selected clip can reach
+      const reach = openPhases(missing(clipData(), list));
       const i = PHASES.findIndex(([p]) => p === ui.phase);
       if (!reach[i]) ui.phase = PHASES[reach.lastIndexOf(true)][0];
     })
@@ -123,8 +126,8 @@
 
     <div class="flex items-center gap-3">
         <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{clips.list.length}</span><span class="label">{clips.list.length == 1 ? "clip" : "clips"}</span></span>
-        <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{project.sightings.length}</span><span class="label">{project.sightings.length == 1 ? "sighting" : "sightings"}</span></span>
-        <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{project.shots.length}</span><span class="label">{project.shots.length == 1 ? "shot" : "shots"}</span></span>
+        <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{clipView.sightings.length}</span><span class="label">{clipView.sightings.length == 1 ? "sighting" : "sightings"}</span></span>
+        <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{clipView.shots.length}</span><span class="label">{clipView.shots.length == 1 ? "shot" : "shots"}</span></span>
       <!-- always in the layout, so the header does not shift between phases; hidden where it does not apply -->
       <button
         class="btn sm {canSplit ? '' : 'invisible'}" aria-pressed={ui.split} onclick={() => (ui.split = !ui.split)} data-testid="split"

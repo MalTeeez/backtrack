@@ -2,7 +2,7 @@
  * Undo and redo for the project data: marks, shots, craters and settings. The clips are not part of it, because a
  * deleted video cannot come back. Changes that follow each other within GROUP_MS (typing, a drag) make one step.
  */
-import { project } from './project.svelte.ts';
+import { fixShot, project } from './project.svelte.ts';
 import type { ProjectData } from '../solver/types.ts';
 
 const GROUP_MS = 600, MAX = 100;
@@ -33,6 +33,9 @@ function restore(s: string) {
   current = s;
   last = 0;
   Object.assign(project, JSON.parse(s));
+  fixShot(); // the step may take away the selected shot
+  // a shot fixShot adds belongs to this step, so the history does not take it for a new change
+  current = JSON.stringify($state.snapshot(project));
   sync();
 }
 const sync = () => Object.assign(history, { undo: undos.length, redo: redos.length });

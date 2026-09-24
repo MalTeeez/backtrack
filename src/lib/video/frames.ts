@@ -1,5 +1,13 @@
 /** Frame times of a clip: a sorted list of presentation times in seconds (prepareClip.ts). Deterministic, without I/O. */
 
+/**
+ * How close two times must be to count as the same frame. Sightings store the presentation time of their frame, so
+ * this only has to be smaller than half the shortest frame interval (4 ms is half a frame at 120 fps).
+ */
+const SAME_FRAME_S = 0.004;
+/** True when both times belong to the same frame. */
+export const sameFrame = (a: number, b: number) => Math.abs(a - b) < SAME_FRAME_S;
+
 /** The index of the frame on screen at time t: the last frame that starts at or before t. */
 export function frameIndexAt(frames: number[], t: number): number {
   let lo = 0, hi = frames.length - 1;

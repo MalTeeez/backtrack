@@ -5,7 +5,7 @@
  * shell was. Where the user stood near the crater follows from each candidate flight (observerShift).
  */
 import { at, flightAt, flights, heightAt, landing, type Ballistics, type Flight } from './ballistics.ts';
-import { D2R, R2D, wrap360 } from './camera.ts';
+import { D2R, R2D, angleDiff, wrap360 } from './camera.ts';
 import type { Fit, GroundAt, Id, Ray, Vec3 } from './types.ts';
 
 /**
@@ -114,7 +114,10 @@ export function fitBallistic(b: Ballistics, rays: Ray[], o: BallisticOptions): F
   for (const r of rays) clips.set(r.clip, [...(clips.get(r.clip) ?? []), r]);
   // one landing per flight, not one per candidate
   const landings = new Map<Flight, ReturnType<typeof landing>>();
+  // the refinement and the Monte Carlo neighborhood step past lo and hi too, so every candidate checks the window
+  const mid = (o.lo + o.hi) / 2, half = (o.hi - o.lo) / 2 + 1e-9;
   const candidate = (th: number, f: Flight): Candidate | null => {
+    if (Math.abs(angleDiff(th, mid)) > half) return null;
     if (!landings.has(f)) landings.set(f, landing(f, dz));
     const l = landings.get(f);
     if (!l) return null;

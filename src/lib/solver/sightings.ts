@@ -32,7 +32,7 @@ export type SightingResult =
   | { ok: true; ray: Ray; az: number; el: number; cam: Camera; warnings: string[] };
 
 /** The crater in game units: its X and Y, or where a rangefinder puts it. Null while an input is missing. */
-export function craterGame(s: Shot): { x: number; y: number } | null {
+export function craterGame(s: Pick<Shot, 'crater'>): { x: number; y: number } | null {
   const f = s.crater.from;
   if (!f) return s.crater.x != null && s.crater.y != null ? { x: s.crater.x, y: s.crater.y } : null;
   if (f.x == null || f.y == null || f.headingDeg == null || f.distanceM == null) return null;

@@ -103,6 +103,14 @@ describe('ballistic model', () => {
       // far from the observer, the miss is more than the positions and the flight model explain
       expect(wrong.fit.excess).toBeGreaterThan(0.5);
     }
+    // the refinement stays inside the tolerance, even when the sightings pull just past its edge
+    const edge = solveShot(exactRays(), tr.C, { ...opt, center: back + 5, tol: 3 });
+    if (edge.error !== undefined) throw new Error(edge.error);
+    expect(Math.abs(((edge.fit.th - back - 5 + 540) % 360) - 180)).toBeLessThanOrEqual(3 + 1e-6);
+    // a heading given past a full turn is the same heading
+    const turned = solveShot(exactRays(), tr.C, { ...opt, center: back + 720, tol: 20 });
+    if (turned.error !== undefined) throw new Error(turned.error);
+    expect(dist(turned.gun, tr.G)).toBeLessThan(2);
   });
 
   test('too few sightings is an error, not a guess', () => {

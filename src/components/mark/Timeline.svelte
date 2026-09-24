@@ -65,7 +65,7 @@
    * button or Alt+X clears it.
    */
   import { Flame, Maximize2, Plus, Repeat, X, ZoomIn, ZoomOut } from '@lucide/svelte';
-  import { clips, newShot, project, ui } from '../../lib/state/project.svelte.ts';
+  import { addShot, clips, project, shotsOf, ui } from '../../lib/state/project.svelte.ts';
   import { untrack } from 'svelte';
   import { frameIndexAt, frameTimeAt } from '../../lib/video/frames.ts';
   import { lacks } from '../../lib/state/missing.ts';
@@ -207,13 +207,10 @@
     return () => el.removeEventListener('wheel', on);
   };
 
-  function addShot() {
-    const s = newShot(project.shots.length + 1);
-    project.shots.push(s);
-    ui.shotId = s.id;
-  }
   // sightings a step where the shell jumps leads to, for an outline on their keyframes
   const jumpy = $derived(new Set(motionFlags($state.snapshot(project)).map((f) => f.to)));
+  // one lane per shot of this clip; the colors stay those of the whole project
+  const lanes = $derived(new Set([...shotsOf(clipId).map((s) => s.id), ui.shotId]));
   const count = (shotId: Id) => project.sightings.filter((s) => s.shotId === shotId && s.clipId === clipId).length;
 </script>
 
@@ -292,6 +289,7 @@
 
     <!-- one lane per shot -->
     {#each project.shots as sh, si (sh.id)}
+      {#if lanes.has(sh.id)}
       {@const active = sh.id === ui.shotId}
       {@const color = shotColor(si)}
       {@const list = project.sightings.filter((s) => s.shotId === sh.id && s.clipId === clipId)}
@@ -341,6 +339,7 @@
           ><Flame size={16} fill="currentColor" /></button>
         {/if}
       </div>
+      {/if}
     {/each}
     <button class="flex items-center gap-1 border-r border-line px-2 py-1 text-[11.5px] text-muted hover:text-text" onclick={addShot} title="New shot: one shell and one crater"><Plus size={12} /> Shot</button>
     <span></span>

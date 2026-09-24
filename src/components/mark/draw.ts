@@ -5,6 +5,37 @@ import type { Pt, Settings, Sighting } from '../../lib/solver/types.ts';
 
 export const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
+/**
+ * A compass rose of radius r around a map point, north up: a tick every 10 deg, a number every 30 deg, and the
+ * suspected heading with its tolerance as an arc when there is one.
+ */
+export function compassRose(g: CanvasRenderingContext2D, x: number, y: number, r: number, suspect?: { deg: number; tol: number }) {
+  const dir = (a: number): [number, number] => [Math.sin((a * Math.PI) / 180), -Math.cos((a * Math.PI) / 180)];
+  g.save();
+  g.lineCap = 'butt'; g.setLineDash([]);
+  if (suspect) {
+    const a = ((suspect.deg - 90) * Math.PI) / 180, t = (suspect.tol * Math.PI) / 180;
+    g.strokeStyle = css('--accent'); g.lineWidth = 8; g.globalAlpha = 0.7;
+    g.beginPath(); g.arc(x, y, r - 4, a - t, a + t); g.stroke();
+    g.globalAlpha = 1;
+  }
+  g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 3; g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke();
+  g.strokeStyle = '#ffffff'; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke();
+  g.font = `600 10px 'Commit Mono', ui-monospace, monospace`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.lineJoin = 'round';
+  for (let a = 0; a < 360; a += 10) {
+    const [dx, dy] = dir(a), len = a % 90 ? (a % 30 ? 4 : 7) : 10;
+    g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(x + dx * r, y + dy * r); g.lineTo(x + dx * (r - len), y + dy * (r - len)); g.stroke();
+    g.strokeStyle = '#ffffff'; g.lineWidth = 1.2; g.stroke();
+    if (a % 30) continue;
+    const t = a % 90 ? String(a) : 'NESW'[a / 90], tx = x + dx * (r + 11), ty = y + dy * (r + 11);
+    g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.75)'; g.strokeText(t, tx, ty);
+    g.fillStyle = '#ffffff'; g.fillText(t, tx, ty);
+  }
+  g.restore();
+}
+
 /** Marks over the video ignore the page theme. They use bright colors that show on game footage. */
 const MARK = { shell: '#e1b06e', edge: '#6a9fcc', grab: '#ffffff' };
 

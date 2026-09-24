@@ -5,7 +5,7 @@
    * sets the crater X and Y. With `onpick`, a click picks another point instead (where the user stood for a sighting),
    * which the map shows as `observer`.
    */
-  import { css } from './mark/draw.ts';
+  import { compassRose, css } from './mark/draw.ts';
   import { drawTiles, mapInfo } from '../lib/map/tiles.svelte.ts';
   import { SOURCE_TOL_DEG } from '../lib/solver/sightings.ts';
   import type { MapId, Shot } from '../lib/solver/types.ts';
@@ -88,6 +88,7 @@
         g.globalAlpha = 0.8; g.beginPath(); g.moveTo(px, py); g.lineTo(px + r * Math.cos(a), py + r * Math.sin(a)); g.stroke();
       }
       g.globalAlpha = 1;
+      compassRose(g, px, py, 60);
       g.fillStyle = css('--impact'); g.strokeStyle = '#000'; g.lineWidth = 1.5;
       g.beginPath(); g.arc(px, py, 6, 0, 7); g.fill(); g.stroke();
     }

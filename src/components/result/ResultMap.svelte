@@ -3,7 +3,7 @@
    * Canvas map in game coordinates: craters, estimated observer positions, tracks and Monte Carlo guns, over the map
    * imagery. It starts on everything the result has. The wheel zooms around the pointer, a drag pans, and Fit goes back.
    */
-  import { css } from '../mark/draw.ts';
+  import { compassRose, css } from '../mark/draw.ts';
   import type { ProjectResult } from '../../lib/solver/result.ts';
   import { theme } from '../../lib/state/theme.svelte.ts';
   import { drawTiles, mapInfo } from '../../lib/map/tiles.svelte.ts';
@@ -213,6 +213,8 @@
           g.strokeStyle = gun; g.lineWidth = 3.5; g.beginPath(); g.arc(gx, gy, 11, 0, 7); g.stroke();
         }
       }
+      // the heading of the solve, not of the project: an edit shows only with the result it gives
+      compassRose(g, ccx, ccy, 60, r.source);
       g.fillStyle = css('--impact'); g.strokeStyle = '#000000'; g.lineWidth = 2;
       g.beginPath(); g.arc(ccx, ccy, 8, 0, 7); g.fill(); g.stroke();
       label(r.name, ccx + 12, ccy + 5);

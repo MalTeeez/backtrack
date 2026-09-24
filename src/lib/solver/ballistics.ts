@@ -5,6 +5,14 @@
  * Bulkhead has not published these values, so they are community estimates.
  */
 
+import type { Weapon } from './types.ts';
+
+/** The weapons of the game and their range (m). */
+export const WEAPONS: Record<Weapon, { name: string; min: number; max: number }> = {
+  L52: { name: 'L52 cannon', min: 600, max: 2600 },
+  L81: { name: 'L81 mortar', min: 80, max: 684 },
+};
+
 export const G = 9.8;
 
 export interface Ballistics { v0: number; k: number; elevMinDeg: number; elevMaxDeg: number }

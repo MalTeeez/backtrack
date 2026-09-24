@@ -2,7 +2,7 @@
   import { importClip } from '../../lib/capture/importClip.ts';
   import { RollingRecorder } from '../../lib/capture/rollingRecorder.ts';
   import { saveClip } from '../../lib/state/persistence.ts';
-  import { clips, project, ui } from '../../lib/state/project.svelte.ts';
+  import { clips, fixShot, project, ui } from '../../lib/state/project.svelte.ts';
   import type { Clip } from '../../lib/solver/types.ts';
 
   // module scope keeps the buffer recording while the user is in another phase
@@ -12,7 +12,7 @@
     await saveClip(clip);
     const { blob, frames: _f, ...meta } = clip;
     clips.list = [{ ...meta, bytes: blob.size }, ...clips.list];
-    ui.clipId ??= meta.id;
+    ui.clipId = meta.id; // a new clip is the one to mark next
   }
 
   const rec = new RollingRecorder({
@@ -24,6 +24,7 @@
       const n = clips.list.filter((c) => c.source === 'buffer').length + 1;
       importClip(blob, `Clip ${n} (${s} s)`, 'buffer')
         .then(add)
+        .then(fixShot)
         .then(() => (status.note = 'Clip saved.'))
         .catch((e) => (status.error = e.message));
     },
@@ -43,14 +44,18 @@
   import { clearHistory } from '../../lib/state/history.svelte.ts';
   import type { ClipMeta } from '../../lib/solver/types.ts';
 
-  const st = project.settings;
+  const st = $derived(project.settings); // undo replaces the settings object
   let over = $state(false);
   let busy = $state(0);
   let confirmDelete: string | null = $state(null);
   const captureOk = canCapture();
   $effect(() => { rec.bufferS = st.bufferS; rec.bitrateMbps = st.bitrateMbps; });
 
+  // a second click while the browser still asks which window to share starts no second capture
+  let starting = false;
   async function start() {
+    if (starting || status.active) return;
+    starting = true;
     status.error = status.note = '';
     try {
       await rec.start(CAPTURE_FPS);
@@ -59,6 +64,8 @@
       status.error = err.name === 'NotAllowedError'
         ? 'The browser did not allow screen capture. If this page blocks screen capture, upload a clip instead.'
         : `The recording could not start (${err.message}).`;
+    } finally {
+      starting = false;
     }
   }
   function saveBuffer() {
@@ -88,9 +95,15 @@
       for (const f of list.filter(isAnnotationFile)) {
         try {
           const a = await readAnnotation(f);
+          // by the file name first, else by the clip name the file records. Several clips of that name: no guess.
+          const byName = (list: ClipMeta[], same: (c: ClipMeta) => boolean) => {
+            const hits = list.filter(same);
+            if (hits.length > 1) throw new Error(`${f.name} fits ${hits.length} clips named ${a.clip.name}. Rename the clips, or upload the file together with its video.`);
+            return hits[0];
+          };
           const clip = added.get(baseName(f.name).toLowerCase())
-            ?? [...added.values()].find((c) => baseName(c.name) === baseName(a.clip.name))
-            ?? clips.list.find((c) => c.name === a.clip.name);
+            ?? byName([...added.values()], (c) => baseName(c.name) === baseName(a.clip.name))
+            ?? byName(clips.list, (c) => c.name === a.clip.name);
           if (!clip) throw new Error(`${f.name} has no video. Upload it together with ${a.clip.name}.`);
           if (added.has(baseName(f.name).toLowerCase()) && clip.name !== a.clip.name) rename(clip, a.clip.name);
           notes.push(...applyAnnotation(project, clip.id, a, { uid, shot: newShot }, clip));
@@ -101,6 +114,7 @@
       }
     } finally {
       busy--;
+      fixShot(); // the selected clip may have changed
     }
     status.error = errors.join(' ');
     status.note = notes.join(' ');

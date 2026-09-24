@@ -2,7 +2,7 @@
  * Turns the whole project into a result for each shot, with its accuracy, and the guns the shots point to (phase 4).
  * Shots that agree on a gun combine; shots that do not come from another gun.
  */
-import { wrap360 } from './camera.ts';
+import { angleDiff, wrap360 } from './camera.ts';
 import { MC_RUNS, makeJitter, percentile, type Rng } from './montecarlo.ts';
 import { SOURCE_TOL_DEG, SightingSolver, craterXyz } from './sightings.ts';
 import { BALLISTICS } from './ballistics.ts';
@@ -32,6 +32,8 @@ export interface ShotResult {
   /** Where the user stood in each clip, as the solver estimates it (meters). */
   observers: Vec3[];
   notes: string[];
+  /** The suspected heading (deg) and its tolerance that the solve used, if the shot has one. */
+  source?: { deg: number; tol: number };
   /** The ground heights the solve used, when they came from terrain data. */
   ground?: { crater: number; gun: number };
 }
@@ -101,6 +103,7 @@ export function solveProject(data: ProjectData, rng: Rng = Math.random, runs = M
     if (prep.bad) r.notes.push(`The solver skipped ${prep.bad} incomplete sighting(s).`);
 
     const opt = options(data, shot, C, heights, ground);
+    if (opt.center != null) r.source = { deg: opt.center, tol: opt.tol };
     if (heights) r.ground = { crater: C[2], gun: opt.zGun };
     const sol = solveShot(prep.rays, C, opt);
     if (sol.error !== undefined) { r.error = sol.error; continue; }
@@ -115,7 +118,7 @@ export function solveProject(data: ProjectData, rng: Rng = Math.random, runs = M
     }
     if (r.mc.length >= 10) {
       r.err90 = percentile(r.mc.map((q) => Math.hypot(q.x - sol.gun.x, q.y - sol.gun.y)), 0.9);
-      const dt = r.mc.map((q) => ((q.th - sol.fit.th + 540) % 360) - 180);
+      const dt = r.mc.map((q) => angleDiff(q.th, sol.fit.th));
       r.dirRange = [wrap360(sol.fit.th + Math.min(0, percentile(dt, 0.05))), wrap360(sol.fit.th + Math.max(0, percentile(dt, 0.95)))];
     } else {
       r.notes.push('Too few Monte Carlo runs gave a result, so the accuracy is unknown. Treat this result as rough.');
@@ -130,6 +133,9 @@ export function solveProject(data: ProjectData, rng: Rng = Math.random, runs = M
     const own = jumps.filter((f) => f.shotId === shot.id);
     if (own.length) r.notes.push(motionShotWarning(shot.name, own));
     if (sol.rangeRequested && !sol.rangeApplied) r.notes.push('No result is inside the weapon range. This result ignores the range limit.');
+    // a fit on the edge of the suspected heading means the sightings pull outside it
+    if (opt.center != null && Math.abs(angleDiff(sol.fit.th, opt.center)) > opt.tol - 0.5)
+      r.notes.push(`The direction ${sol.fit.th.toFixed(1)} deg sits on the edge of the suspected heading ${opt.center} +/- ${opt.tol} deg, so the sightings point outside it. Check the suspected heading, the compass headings and the marks.`);
     if (sol.fit.excess > 0.5) r.notes.push('The fit error is high. Check the FOV, the headings and the marks.');
   }
 

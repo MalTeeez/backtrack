@@ -4,6 +4,8 @@ import type { Pt, Vec3 } from './types.ts';
 export const D2R = Math.PI / 180;
 export const R2D = 180 / Math.PI;
 export const wrap360 = (a: number) => { a %= 360; return a < 0 ? a + 360 : a; };
+/** The signed difference a - b (deg) in [-180, 180), for any a and b. */
+export const angleDiff = (a: number, b: number) => wrap360(a - b + 180) - 180;
 
 /** Focal length in pixels, f = (W/2) / tan(FOV/2). A vertical FOV uses H instead of W. */
 export function focalPx(w: number, h: number, fovDeg: number, axis: 'h' | 'v'): number {

@@ -41,6 +41,8 @@ export interface Shot {
   /** Left out of the calculation, to test what it changes. */
   excluded?: boolean;
   impactTimeS: Record<Id, number>; // clipId -> seconds
+  /** The clip the shot belongs to (one clip for now). None only for a new shot while no clip has taken it. */
+  clipId?: Id;
 }
 
 export interface Sighting {
