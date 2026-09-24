@@ -4,7 +4,7 @@ import type { Id, Settings } from './types.ts';
 
 export const MC_RUNS = 40;
 
-/** The 1-sigma error of a marked impact time: half a frame at 60 fps. Recordings have no fixed frame rate, so this is a typical value. */
+/** The least error of an impact time (s), for an interval of zero width. */
 export const IMPACT_SIGMA_S = 1 / 120;
 
 export type Rng = () => number;
@@ -25,14 +25,18 @@ export function randn(rng: Rng): number {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
-/** Adds mark errors (sigma in px), compass errors (sigma in deg) and an impact time error (IMPACT_SIGMA_S, one draw per clip). */
+/**
+ * Adds mark errors (px), compass errors (deg) and errors of automatic angles (deg), each with the sigma of its value or
+ * the accuracy of the settings, and an impact time error (one draw per clip, anywhere in the impact interval).
+ */
 export function makeJitter(st: Settings, rng: Rng): Jitter {
   const impacts = new Map<Id, number>();
   return {
-    px: () => randn(rng) * st.markSigmaPx,
-    heading: () => randn(rng) * st.compassSigmaDeg,
-    impact: (clipId) => {
-      if (!impacts.has(clipId)) impacts.set(clipId, randn(rng) * IMPACT_SIGMA_S);
+    px: (sigma = st.markSigmaPx) => randn(rng) * sigma,
+    heading: (sigma = st.compassSigmaDeg) => randn(rng) * sigma,
+    angle: (sigma) => randn(rng) * sigma,
+    impact: (clipId, half) => {
+      if (!impacts.has(clipId)) impacts.set(clipId, half > 0 ? (2 * rng() - 1) * half : randn(rng) * IMPACT_SIGMA_S);
       return impacts.get(clipId)!;
     },
   };

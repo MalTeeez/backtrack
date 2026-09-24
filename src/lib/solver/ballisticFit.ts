@@ -6,23 +6,33 @@
  */
 import { at, flightAt, flights, heightAt, landing, type Ballistics, type Flight } from './ballistics.ts';
 import { D2R, R2D, angleDiff, wrap360 } from './camera.ts';
-import type { Fit, GroundAt, Id, Ray, Vec3 } from './types.ts';
+import type { Fit, GroundAt, Id, Ray, ShiftPrior, Vec3 } from './types.ts';
+
+/** The angular error (rad) of a ray without its own. */
+const RAY_SIGMA = 1e-3;
 
 /**
- * The ground shift (m) of the observer that brings the rays closest to the shell points P, by least squares on the
- * distance of each point from its ray. The rays start at the crater, and the user stood near it, but not on it.
+ * The ground shift (m) of the observer that brings the rays closest to the shell points P, by weighted least squares
+ * on the distance of each point from its ray: a ray counts with its angular error times the distance of its point.
+ * The rays start at the crater, and the user stood near it, but not on it. A prior (where the minimap puts the user)
+ * pulls the shift toward itself with its own error.
  */
-export function observerShift(rays: Ray[], P: Vec3[]): [number, number] {
+export function observerShift(rays: Ray[], P: Vec3[], prior?: ShiftPrior): [number, number] {
   let a = 0, b = 0, d = 0, u = 0, w = 0;
   rays.forEach((r, i) => {
     const D = r.D, q = [P[i][0] - r.O[0], P[i][1] - r.O[1], P[i][2] - r.O[2]];
+    const sm = Math.max(0.05, (r.sigma ?? RAY_SIGMA) * Math.hypot(q[0], q[1], q[2])), k = 1 / (sm * sm);
     // M = I - D D^T keeps the part across the ray. The shift moves only x and y.
     const dq = D[0] * q[0] + D[1] * q[1] + D[2] * q[2];
-    a += 1 - D[0] * D[0]; b -= D[0] * D[1]; d += 1 - D[1] * D[1];
-    u += q[0] - D[0] * dq; w += q[1] - D[1] * dq;
+    a += k * (1 - D[0] * D[0]); b -= k * D[0] * D[1]; d += k * (1 - D[1] * D[1]);
+    u += k * (q[0] - D[0] * dq); w += k * (q[1] - D[1] * dq);
   });
+  if (prior) {
+    const k = 1 / (prior.sigma * prior.sigma);
+    a += k; d += k; u += k * prior.s[0]; w += k * prior.s[1];
+  }
   const det = a * d - b * b;
-  return Math.abs(det) < 1e-12 ? [0, 0] : [(u * d - b * w) / det, (a * w - b * u) / det];
+  return Math.abs(det) < 1e-18 ? [0, 0] : [(u * d - b * w) / det, (a * w - b * u) / det];
 }
 
 interface Candidate { th: number; f: Flight; R: number; T: number }
@@ -43,28 +53,35 @@ const MODEL_M = 10;
 
 /**
  * The observer shift of each clip, and the error of the rays against one candidate flight: the angular RMS (deg), the
- * RMS miss (m), and the RMS of the angle beyond what a miss of MODEL_M explains (deg).
+ * RMS miss (m), the RMS of the angle beyond what a miss of MODEL_M explains (deg), and the robust cost the search
+ * minimizes, where each miss counts in units of the error of its ray (`w` scales each ray, section 12.5).
  */
-function evaluate(c: Candidate, clips: Map<Id, Ray[]>, n: number, C: Vec3, zGun: number) {
+function evaluate(c: Candidate, clips: Map<Id, Ray[]>, n: number, C: Vec3, zGun: number, w: Map<Ray, number>, priors?: Record<Id, ShiftPrior>) {
   const th = c.th * D2R, dx = Math.sin(th), dy = Math.cos(th);
   const gx = C[0] + c.R * dx, gy = C[1] + c.R * dy;
   const shifts: Record<Id, [number, number]> = {};
   let ss = 0, cost = 0, sm = 0, so = 0;
   for (const [clip, rays] of clips) {
     const P = rays.map((r): Vec3 => { const p = at(c.f, c.T - r.tau); return [gx - p.x * dx, gy - p.x * dy, zGun + p.z]; });
-    // only rays without a known position move with the estimated spot near the crater
-    const free = rays.map((r, i) => ({ r, P: P[i] })).filter((x) => !x.r.fixed);
-    const [ox, oy] = free.length ? (shifts[clip] = observerShift(free.map((x) => x.r), free.map((x) => x.P))) : [0, 0];
+    const [ox, oy] = (shifts[clip] = observerShift(rays, P, priors?.[clip]));
     rays.forEach((r, i) => {
-      const sx = r.fixed ? 0 : ox, sy = r.fixed ? 0 : oy;
-      const v = [P[i][0] - r.O[0] - sx, P[i][1] - r.O[1] - sy, P[i][2] - r.O[2]];
+      const v = [P[i][0] - r.O[0] - ox, P[i][1] - r.O[1] - oy, P[i][2] - r.O[2]];
       const len = Math.hypot(v[0], v[1], v[2]), cos = (v[0] * r.D[0] + v[1] * r.D[1] + v[2] * r.D[2]) / len;
       const a = Math.acos(Math.max(-1, Math.min(1, cos))), over = Math.max(0, a - Math.atan(MODEL_M / len));
       ss += a * a; sm += (Math.sin(a) * len) ** 2; so += over * over;
-      cost += ROBUST * ROBUST * Math.log1p((a / ROBUST) ** 2);
+      cost += ROBUST * ROBUST * Math.log1p(((a * w.get(r)!) / ROBUST) ** 2);
     });
   }
   return { shifts, rms: Math.sqrt(ss / n) * R2D, missM: Math.sqrt(sm / n), excess: Math.sqrt(so / n) * R2D, cost };
+}
+
+/**
+ * The scale of each ray in the cost: the median error of the rays over its own, so a typical ray keeps the scale
+ * ROBUST and a ray with a larger error (a fast shell, a vague mark) counts less.
+ */
+function rayScales(rays: Ray[]): Map<Ray, number> {
+  const sig = rays.map((r) => r.sigma ?? RAY_SIGMA), ref = [...sig].sort((a, b) => a - b)[sig.length >> 1];
+  return new Map(rays.map((r, i) => [r, ref / sig[i]]));
 }
 
 export interface BallisticOptions {
@@ -74,6 +91,8 @@ export interface BallisticOptions {
   ground?: GroundAt;
   /** A known fit to start from (the Monte Carlo runs): the search stays within 5 deg of its direction and elevation. */
   near?: { th: number; e: number };
+  /** Where the minimap puts the user in each clip, as a shift from the crater. */
+  priors?: Record<Id, ShiftPrior>;
 }
 
 // the terrain check: a sample every 10 m, 3 m of slack for the 2 m terrain grid, and 30 m at each end, where the
@@ -112,6 +131,7 @@ export function fitBallistic(b: Ballistics, rays: Ray[], o: BallisticOptions): F
   const dz = o.C[2] - o.zGun;
   const clips = new Map<Id, Ray[]>();
   for (const r of rays) clips.set(r.clip, [...(clips.get(r.clip) ?? []), r]);
+  const w = rayScales(rays);
   // one landing per flight, not one per candidate
   const landings = new Map<Flight, ReturnType<typeof landing>>();
   // the refinement and the Monte Carlo neighborhood step past lo and hi too, so every candidate checks the window
@@ -124,13 +144,17 @@ export function fitBallistic(b: Ballistics, rays: Ray[], o: BallisticOptions): F
     if (o.range && (l.R < o.range[0] || l.R > o.range[1])) return null;
     return { th: wrap360(th), f, R: l.R, T: l.T };
   };
+  const NEAR = 5;
+  const [lo, hi, step] = o.near ? [o.near.th - NEAR, o.near.th + NEAR, 0.5] : [o.lo, o.hi, 1];
+  let curve: Float64Array | null = null;
   // a holder, because TypeScript does not see the closure assign it
   const found: { best: (Candidate & ReturnType<typeof evaluate>) | null } = { best: null };
   // the terrain check runs only for a candidate that would become the best, which keeps it cheap
   const tryOne = (th: number, f: Flight) => {
     const c = candidate(th, f);
     if (!c) return;
-    const e = evaluate(c, clips, rays.length, o.C, o.zGun);
+    const e = evaluate(c, clips, rays.length, o.C, o.zGun, w, o.priors);
+    if (curve) { const k = Math.round((th - lo) / step) % curve.length; if (k >= 0 && e.cost < curve[k]) curve[k] = e.cost; }
     if (found.best && e.cost >= found.best.cost) return;
     if (o.ground && !clears(c, o.C, o.zGun, o.ground)) return;
     found.best = { ...c, ...e };
@@ -138,10 +162,13 @@ export function fitBallistic(b: Ballistics, rays: Ray[], o: BallisticOptions): F
 
   // coarse: every elevation of the table for each direction, then a finer direction step near the best one. Near a
   // known fit, only its neighborhood.
-  const NEAR = 5;
   const table = o.near ? flights(b, 0.5).filter((f) => Math.abs(f.e - o.near!.e) <= NEAR) : flights(b, 0.5);
-  const [lo, hi, step] = o.near ? [o.near.th - NEAR, o.near.th + NEAR, 0.5] : [o.lo, o.hi, 1];
+  // the least cost of each direction of the coarse search, for the ambiguity report (section 12.3)
+  const circular = o.hi - o.lo >= 360 - 1e-9;
+  curve = o.near ? null : new Float64Array(circular ? Math.round(360 / step) : Math.floor((hi - lo) / step + 1e-9) + 1).fill(Infinity);
   for (let th = lo; th <= hi + 1e-9; th += step) for (const f of table) tryOne(th, f);
+  const coarse = curve;
+  curve = null;
   if (!found.best) return null;
   const b0: Candidate = found.best;
   for (let th = b0.th - 1.5; th <= b0.th + 1.5; th += 0.1) for (const f of table) tryOne(th, f);
@@ -158,9 +185,36 @@ export function fitBallistic(b: Ballistics, rays: Ray[], o: BallisticOptions): F
   }
   const r = found.best!;
   return {
-    th: r.th, e: r.f.e, R: r.R, T: r.T, rms: r.rms, missM: r.missM, excess: r.excess, shifts: r.shifts,
+    th: r.th, e: r.f.e, R: r.R, T: r.T, rms: r.rms, missM: r.missM, excess: r.excess, shifts: r.shifts, cost: r.cost,
+    second: (coarse && secondMinimum(coarse, lo, step, circular)) ?? undefined,
     // how hard the shot is: without the ends, where the ground under a gun on a slope or next to the crater says
     // nothing about the flight
     clearance: o.ground ? clearance(r, o.C, o.zGun, o.ground, -Infinity, Math.max(100, r.R * 0.1)) : undefined,
   };
+}
+
+/** The least cost that counts as a real misfit for n rays: each off by 0.1 deg. Below it, costs are noise. */
+export const costFloor = (n: number) => n * ROBUST * ROBUST * Math.log1p(((0.1 * D2R) / ROBUST) ** 2);
+
+/** Directions closer than this (deg) to the best one belong to its minimum. */
+const SAME_MINIMUM_DEG = 15;
+
+/**
+ * The second-best minimum of the coarse cost over direction: the least local minimum at least SAME_MINIMUM_DEG from
+ * the best one, with its cost and the cost of the best. Null when there is none.
+ */
+export function secondMinimum(curve: Float64Array, lo: number, step: number, circular: boolean): { th: number; cost: number; best: number } | null {
+  const n = curve.length;
+  let bi = 0;
+  for (let i = 1; i < n; i++) if (curve[i] < curve[bi]) bi = i;
+  const at = (i: number) => (circular ? curve[(i + n) % n] : i < 0 || i >= n ? Infinity : curve[i]);
+  let second: { th: number; cost: number } | null = null;
+  for (let i = 0; i < n; i++) {
+    const c = curve[i];
+    if (!Number.isFinite(c) || c > at(i - 1) || c > at(i + 1)) continue;
+    const d = circular ? Math.abs(angleDiff(i * step, bi * step)) : Math.abs(i - bi) * step;
+    if (d < SAME_MINIMUM_DEG) continue;
+    if (!second || c < second.cost) second = { th: wrap360(lo + i * step), cost: c };
+  }
+  return second && { ...second, best: curve[bi] };
 }

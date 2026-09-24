@@ -1,35 +1,34 @@
 /** The annotation file of a clip: its export from the project and its import back. Deterministic, without I/O. */
 import { sameFrame } from '../video/frames.ts';
 import { WEAPONS } from '../solver/ballistics.ts';
-import type { ClipMeta, Id, ProjectData, Pt, Settings, Shot, Sighting } from '../solver/types.ts';
+import type { ClipData, ClipMeta, Id, ProjectData, Settings, Shot, Sighting } from '../solver/types.ts';
 
 export const FORMAT = 'backtrack-annotation';
-export const VERSION = 1;
+/**
+ * Version 2 stores every value that Backtrack can detect as a field: the user's value, and the automatic value with
+ * its sigma and confidence (automation plan section 3). The app reads only this version.
+ */
+export const VERSION = 2;
 
-/** The annotation file. Files of older versions of the app also have a position, which the import ignores. */
+/** The annotation file. */
 export interface Annotation {
   format: typeof FORMAT;
   version: number;
   clip: Omit<ClipMeta, 'id'>;
-  /** The range settings came later: an older file has only the weapon, and gets its default range. */
-  settings: Pick<Settings, 'fovDeg' | 'fovAxis' | 'weapon'> & Partial<Pick<Settings, 'rangeMinM' | 'rangeMaxM' | 'limitToRange'>>;
-  shots: {
-    name: string;
-    crater: Shot['crater'];
-    sourceDeg?: number; sourceTolDeg?: number;
-    impactTimeS: number | null;
-    excluded?: boolean;
-  }[];
-  sightings: {
-    shot: string | null; timeS: number; frameW: number; frameH: number;
-    shell?: Pt; edges: [Pt, Pt][]; headingDeg?: number; zoom?: number; position?: Sighting['position']; sameCameraAsPrevious: boolean; excluded?: boolean;
-  }[];
+  /** What the project knows about the clip: its map. */
+  data?: ClipData;
+  settings: Pick<Settings, 'fovDeg' | 'fovAxis' | 'weapon' | 'rangeMinM' | 'rangeMaxM' | 'limitToRange'>;
+  shots: (Pick<Shot, 'name' | 'crater' | 'rangefinder' | 'sourceDeg' | 'sourceTolDeg' | 'excluded'> & {
+    impact: Shot['impact'][Id] | null;
+    observer: Shot['observer'][Id] | null;
+  })[];
+  sightings: (Omit<Sighting, 'id' | 'clipId' | 'shotId'> & { shot: string | null })[];
 }
 
 /** Everything the project knows about one clip, or null when the clip has no marks or impact. */
 export function annotation(p: ProjectData, clip: ClipMeta): Annotation | null {
   const sightings = p.sightings.filter((s) => s.clipId === clip.id);
-  const shots = p.shots.filter((s) => s.impactTimeS[clip.id] != null || sightings.some((x) => x.shotId === s.id));
+  const shots = p.shots.filter((s) => s.impact[clip.id] != null || sightings.some((x) => x.shotId === s.id));
   if (!sightings.length && !shots.length) return null;
   const { id: _, ...meta } = clip;
   // sightings name their shot, so two shots of one name get different names in the file
@@ -44,13 +43,14 @@ export function annotation(p: ProjectData, clip: ClipMeta): Annotation | null {
     format: FORMAT,
     version: VERSION,
     clip: meta,
+    ...(p.clips[clip.id] ? { data: p.clips[clip.id] } : {}),
     settings: {
       fovDeg: p.settings.fovDeg, fovAxis: p.settings.fovAxis, weapon: p.settings.weapon,
       rangeMinM: p.settings.rangeMinM, rangeMaxM: p.settings.rangeMaxM, limitToRange: p.settings.limitToRange,
     },
     shots: shots.map((s) => ({
-      name: names.get(s.id)!, crater: { ...s.crater }, sourceDeg: s.sourceDeg, sourceTolDeg: s.sourceTolDeg,
-      impactTimeS: s.impactTimeS[clip.id] ?? null,
+      name: names.get(s.id)!, crater: s.crater, rangefinder: s.rangefinder, sourceDeg: s.sourceDeg, sourceTolDeg: s.sourceTolDeg,
+      impact: s.impact[clip.id] ?? null, observer: s.observer[clip.id] ?? null,
       ...(s.excluded ? { excluded: true } : {}),
     })),
     sightings: sightings
@@ -67,15 +67,18 @@ export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make:
   const notes: string[] = [];
   const s = a.settings;
   if (!p.sightings.length) {
-    const w = WEAPONS[s.weapon] ? s.weapon : p.settings.weapon;
+    const w = s.weapon && WEAPONS[s.weapon] ? s.weapon : undefined;
     Object.assign(p.settings, {
       fovDeg: s.fovDeg, fovAxis: s.fovAxis, weapon: w,
-      rangeMinM: s.rangeMinM ?? WEAPONS[w].min, rangeMaxM: s.rangeMaxM ?? WEAPONS[w].max, limitToRange: s.limitToRange ?? p.settings.limitToRange,
+      rangeMinM: s.rangeMinM ?? WEAPONS[w ?? 'L52'].min, rangeMaxM: s.rangeMaxM ?? WEAPONS[w ?? 'L52'].max, limitToRange: s.limitToRange ?? p.settings.limitToRange,
     });
   }
   else if (s.fovDeg !== p.settings.fovDeg || s.fovAxis !== p.settings.fovAxis) {
     notes.push(`The file used a FOV of ${s.fovDeg} deg (${s.fovAxis === 'h' ? 'horizontal' : 'vertical'}). The project keeps ${p.settings.fovDeg} deg.`);
   }
+
+  // the map of the clip, unless the user already picked one
+  if (a.data && p.clips[clipId]?.map.manual == null) p.clips[clipId] = structuredClone(a.data);
 
   const shotIds = new Map<string, Id>();
   for (const f of a.shots) {
@@ -90,10 +93,11 @@ export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make:
       if (!unused) p.shots.push(shot);
       shot = p.shots.find((x) => x.id === shot!.id)!; // the reactive copy
     }
-    if (shot.crater.x == null && !shot.crater.from) shot.crater = { ...f.crater };
+    if (blankShot(shot)) { shot.crater = structuredClone(f.crater); if (f.rangefinder) shot.rangefinder = { ...f.rangefinder }; }
     if (shot.sourceDeg == null && f.sourceDeg != null) shot.sourceDeg = f.sourceDeg;
     if (shot.sourceTolDeg == null && f.sourceTolDeg != null) shot.sourceTolDeg = f.sourceTolDeg;
-    if (f.impactTimeS != null) shot.impactTimeS[clipId] = f.impactTimeS;
+    if (f.impact) shot.impact[clipId] = structuredClone(f.impact);
+    if (f.observer) shot.observer[clipId] = structuredClone(f.observer);
     if (f.excluded) shot.excluded = true;
     shotIds.set(f.name, shot.id);
   }
@@ -113,10 +117,8 @@ export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make:
     // the same file imported twice: a sighting of this shot on this frame is already there
     if (p.sightings.some((y) => y.clipId === clipId && y.shotId === shotId && sameFrame(y.timeS, x.timeS))) { again++; continue; }
     if (x.frameW !== video.width || x.frameH !== video.height) otherSize++;
-    p.sightings.push({
-      id: make.uid(), shotId, clipId, timeS: x.timeS, frameW: x.frameW, frameH: x.frameH,
-      shell: x.shell, edges: x.edges ?? [], headingDeg: x.headingDeg, zoom: x.zoom, position: x.position, sameCameraAsPrevious: !!x.sameCameraAsPrevious, ...(x.excluded ? { excluded: true } : {}),
-    });
+    const { shot: _, ...rest } = structuredClone(x);
+    p.sightings.push({ ...rest, id: make.uid(), shotId, clipId, edges: rest.edges ?? [], sameCameraAsPrevious: !!rest.sameCameraAsPrevious });
   }
   if (again) notes.push(`${again} sighting(s) of the file were already there and were skipped.`);
   if (otherSize) notes.push(`The file has ${otherSize} sighting(s) from a ${a.sightings[0].frameW}x${a.sightings[0].frameH} video, but this video is ${video.width}x${video.height}. Check the marks.`);
@@ -125,10 +127,10 @@ export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make:
 
 /** The clips a shot has a sighting or an impact mark in. */
 export const clipsOfShot = (p: ProjectData, s: Shot) =>
-  new Set([...Object.keys(s.impactTimeS), ...p.sightings.filter((x) => x.shotId === s.id).map((x) => x.clipId)]);
+  new Set([...Object.keys(s.impact), ...p.sightings.filter((x) => x.shotId === s.id).map((x) => x.clipId)]);
 
 /** A shot with no crater yet. */
-export const blankShot = (s: Shot) => s.crater.x == null && s.crater.y == null && !s.crater.from;
+export const blankShot = (s: Shot) => s.crater.manual == null && s.crater.auto == null && !s.rangefinder;
 
 /** A new shot that no clip has taken yet: the first clip takes it instead of making another one. */
 export const freeShot = (p: ProjectData, s: Shot) => s.clipId == null && !clipsOfShot(p, s).size && blankShot(s);
@@ -147,9 +149,9 @@ export function oneClipPerShot(p: ProjectData, make: { uid: () => Id }): string[
     const inClips = [...clipsOfShot(p, s)];
     s.clipId ??= inClips[0];
     for (const [i, clipId] of inClips.filter((c) => c !== s.clipId).entries()) {
-      const shot: Shot = { id: make.uid(), name: `${s.name} (${i + 2})`, crater: {}, impactTimeS: {}, clipId, ...(s.excluded ? { excluded: true } : {}) };
-      if (s.impactTimeS[clipId] != null) shot.impactTimeS[clipId] = s.impactTimeS[clipId];
-      delete s.impactTimeS[clipId];
+      const shot: Shot = { id: make.uid(), name: `${s.name} (${i + 2})`, crater: {}, impact: {}, observer: {}, clipId, ...(s.excluded ? { excluded: true } : {}) };
+      if (s.impact[clipId] != null) shot.impact[clipId] = s.impact[clipId];
+      delete s.impact[clipId];
       for (const x of own) if (x.clipId === clipId) x.shotId = shot.id;
       p.shots.push(shot);
       made.push(shot.name);

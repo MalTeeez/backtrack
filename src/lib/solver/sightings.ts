@@ -1,6 +1,7 @@
 /** Turns a sighting into a camera and a ray, and gives the quality warnings of each sighting (plan sections 3 and 6). */
 import { PITCH_SIGMA_MAX, azEl, centered, edgeReport, focalPx, rayWorld } from './camera.ts';
-import type { Heights, Id, ProjectData, Pt, Ray, Shot, Sighting, Vec3 } from './types.ts';
+import { impactSigma, impactTime, sigmaOf, value } from './field.ts';
+import type { Heights, Id, ProjectData, Pt, Ray, Shot, Sighting, Vec3, XY } from './types.ts';
 
 /** One game unit is 100 m. */
 export const GAME_UNIT_M = 100;
@@ -16,12 +17,21 @@ export const SOURCE_TOL_DEG = 30;
 
 /** Random errors for one Monte Carlo run. Without them, the solver uses the marks as they are. */
 export interface Jitter {
-  px: () => number;      // pixels, one draw per coordinate
-  heading: () => number; // degrees
-  impact: (clipId: Id) => number; // seconds, the same for every sighting in a clip
+  /** Pixels, one draw per coordinate, with the sigma of an automatic mark or the mark accuracy of the settings. */
+  px: (sigma?: number) => number;
+  /** Degrees, with the sigma of an automatic heading or the compass accuracy of the settings. */
+  heading: (sigma?: number) => number;
+  /** Degrees of an automatic pitch or roll, with its sigma. */
+  angle: (sigma: number) => number;
+  /** Seconds, the same for every sighting in a clip: somewhere in the impact interval of half width `half`. */
+  impact: (clipId: Id, half: number) => number;
 }
 
-export interface Camera { h: number; p: number; source: 'compass and edges' | 'copied' }
+export interface Camera {
+  h: number; p: number; r: number;
+  /** Where the pitch comes from: the marked edges, the automatic value, the value the user typed, or an earlier sighting. */
+  source: 'edges' | 'auto' | 'typed' | 'copied';
+}
 
 export type Aim =
   | { ok: false; error: string; warnings: string[] }
@@ -31,20 +41,28 @@ export type SightingResult =
   | { ok: false; error: string; warnings: string[] }
   | { ok: true; ray: Ray; az: number; el: number; cam: Camera; warnings: string[] };
 
-/** The crater in game units: its X and Y, or where a rangefinder puts it. Null while an input is missing. */
-export function craterGame(s: Pick<Shot, 'crater'>): { x: number; y: number } | null {
-  const f = s.crater.from;
-  if (!f) return s.crater.x != null && s.crater.y != null ? { x: s.crater.x, y: s.crater.y } : null;
-  if (f.x == null || f.y == null || f.headingDeg == null || f.distanceM == null) return null;
-  const h = (f.headingDeg * Math.PI) / 180;
-  return { x: f.x + (f.distanceM * Math.sin(h)) / GAME_UNIT_M, y: f.y + (f.distanceM * Math.cos(h)) / GAME_UNIT_M };
+/** The crater in game units: the user's value (a complete rangefinder reading first), else a confident automatic one. */
+export function craterGame(s: Pick<Shot, 'crater' | 'rangefinder'>): XY | null {
+  const f = s.rangefinder;
+  if (f) {
+    if (f.x == null || f.y == null || f.headingDeg == null || f.distanceM == null) return null;
+    const h = (f.headingDeg * Math.PI) / 180;
+    return { x: f.x + (f.distanceM * Math.sin(h)) / GAME_UNIT_M, y: f.y + (f.distanceM * Math.cos(h)) / GAME_UNIT_M };
+  }
+  return value(s.crater) ?? null;
 }
 
-/** The crater in meters, on the ground (0 without terrain data). Null while an input is missing. */
-export const craterXyz = (s: Shot, ground = 0): Vec3 | null => {
-  const c = craterGame(s);
-  return c ? [c.x * GAME_UNIT_M, c.y * GAME_UNIT_M, ground] : null;
-};
+/** Where the user stood during the flight of a shot, in the clip of the shot (game units), or null. */
+export const observerGame = (s: Pick<Shot, 'observer' | 'clipId'>): XY | null => (s.clipId ? value(s.observer[s.clipId]) ?? null : null);
+
+/**
+ * The point the rays of a shot start from (game units): the crater, or where the user stood when the crater is not
+ * known. The solver then finds the crater from the end of the flight (automation plan section 11).
+ */
+export const anchorGame = (s: Shot): XY | null => craterGame(s) ?? observerGame(s);
+
+/** A game point in meters, at a ground height. */
+export const toMeters = (p: XY, ground = 0): Vec3 => [p.x * GAME_UNIT_M, p.y * GAME_UNIT_M, ground];
 
 /**
  * Solves the sightings of a project. Each Monte Carlo run gets its own instance, so a copied camera
@@ -59,15 +77,15 @@ export class SightingSolver {
   }
 
   /** The focal length of a sighting in pixels: a zoom of 4 makes it 4 times longer. */
-  private f(s: Sighting) {
+  f(s: Sighting) {
     const st = this.data.settings;
     return focalPx(s.frameW, s.frameH, st.fovDeg, st.fovAxis) * (s.zoom ?? 1);
   }
-  private jp(p: Pt): Pt {
-    return this.J ? { x: p.x + this.J.px(), y: p.y + this.J.px() } : p;
+  private jp(p: Pt, sigma?: number): Pt {
+    return this.J ? { x: p.x + this.J.px(sigma), y: p.y + this.J.px(sigma) } : p;
   }
 
-  /** Gets the camera of a sighting from its own edges and compass heading. The run caches it. */
+  /** Gets the camera of a sighting from its own data. The run caches it. */
   ownCamera(s: Sighting) {
     const hit = this.cams.get(s.id);
     if (hit) return hit;
@@ -76,36 +94,33 @@ export class SightingSolver {
     return out;
   }
 
-  private computeOwnCamera(s: Sighting): { cam?: Camera; error?: string; warnings: string[] } {
-    const f = this.f(s), sigPx = this.data.settings.markSigmaPx;
-    const warnings: string[] = [];
-    const rep = edgeReport(s.edges.map(([a, b]) => [this.jp(a), this.jp(b)] as [Pt, Pt]), s.frameW, s.frameH, f, sigPx);
-    rep.edges.forEach((e, i) => {
-      if (e.pitch == null) warnings.push(`Edge ${i + 1} cannot give a pitch. Mark it again.`);
-      else if (e.offBy != null) warnings.push(`Edge ${i + 1} differs from the other edges by ${Math.abs(e.offBy).toFixed(1)} deg, more than its marks explain, so the pitch leaves it out. Check that it is vertical.`);
-    });
-    if (rep.pitch != null && rep.sigma > PITCH_SIGMA_MAX) {
-      warnings.push(`The pitch from the edges is only accurate to +/-${rep.sigma.toFixed(1)} deg. A longer edge nearer the side of the frame might give a more exact result.`);
+  /** The pitch: typed by the user, from the marked edges, or automatic, in that order. */
+  private pitch(s: Sighting, warnings: string[]): { p: number; source: Camera['source'] } | null {
+    if (s.pitch.manual != null) return { p: s.pitch.manual, source: 'typed' };
+    if (s.edges.length) {
+      const rep = edgeReport(s.edges.map(([a, b]) => [this.jp(a), this.jp(b)] as [Pt, Pt]), s.frameW, s.frameH, this.f(s), this.data.settings.markSigmaPx);
+      rep.edges.forEach((e, i) => {
+        if (e.pitch == null) warnings.push(`Edge ${i + 1} cannot give a pitch. Mark it again.`);
+        else if (e.offBy != null) warnings.push(`Edge ${i + 1} differs from the other edges by ${Math.abs(e.offBy).toFixed(1)} deg, more than its marks explain, so the pitch leaves it out. Check that it is vertical.`);
+      });
+      if (rep.pitch != null && rep.sigma > PITCH_SIGMA_MAX) {
+        warnings.push(`The pitch from the edges is only accurate to +/-${rep.sigma.toFixed(1)} deg. A longer edge nearer the side of the frame might give a more exact result.`);
+      }
+      if (rep.pitch != null) return { p: rep.pitch, source: 'edges' };
     }
-
-    const heading = s.headingDeg;
-    if (rep.pitch == null && heading == null) return { error: 'This sighting has no camera data. Mark a vertical edge and type the compass heading.', warnings };
-    if (rep.pitch == null) return { error: 'This sighting has no pitch. Mark a vertical edge.', warnings };
-    if (heading == null) return { error: 'This sighting has no heading. Type the compass heading.', warnings };
-    return { cam: { h: heading + (this.J ? this.J.heading() : 0), p: rep.pitch, source: 'compass and edges' }, warnings };
+    const auto = value(s.pitch);
+    return auto == null ? null : { p: auto + (this.J ? this.J.angle(sigmaOf(s.pitch) ?? 0) : 0), source: 'auto' };
   }
 
-  /** Where the user stood: the position of the sighting, or of the one whose camera it copies. Null without one. */
-  position(s: Sighting): { x: number; y: number } | null {
-    let cur: Sighting | undefined = s;
-    while (cur) {
-      const p = cur.position;
-      if (p?.x != null && p.y != null) return { x: p.x, y: p.y };
-      if (!cur.sameCameraAsPrevious) return null;
-      const t: number = cur.timeS, clip: Id = cur.clipId;
-      cur = this.data.sightings.filter((x) => x.clipId === clip && x.timeS < t).sort((a, b) => b.timeS - a.timeS)[0];
-    }
-    return null;
+  private computeOwnCamera(s: Sighting): { cam?: Camera; error?: string; warnings: string[] } {
+    const warnings: string[] = [];
+    const pitch = this.pitch(s, warnings), heading = value(s.heading);
+    if (pitch == null && heading == null) return { error: 'This sighting has no camera data. Mark a vertical edge and type the compass heading.', warnings };
+    if (pitch == null) return { error: 'This sighting has no pitch. Mark a vertical edge.', warnings };
+    if (heading == null) return { error: 'This sighting has no heading. Type the compass heading.', warnings };
+    const r = (value(s.roll) ?? 0) + (this.J ? this.J.angle(sigmaOf(s.roll) ?? 0) : 0);
+    const h = heading + (this.J ? this.J.heading(sigmaOf(s.heading)) : 0);
+    return { cam: { h, p: pitch.p, r, source: pitch.source }, warnings };
   }
 
   /** The camera of an earlier sighting in the same clip. */
@@ -133,27 +148,28 @@ export class SightingSolver {
       if (!own.cam) return { ok: false, error: own.error!, warnings };
       cam = own.cam;
     }
-    if (!s.shell) return { ok: false, error: 'Mark the shell.', warnings };
-    const D = rayWorld(centered(this.jp(s.shell), s.frameW, s.frameH), this.f(s), cam.h, cam.p);
+    const shell = value(s.shell);
+    if (!shell) return { ok: false, error: s.shell.auto?.reason ? `Mark the shell (${s.shell.auto.reason}).` : 'Mark the shell.', warnings };
+    const D = rayWorld(centered(this.jp(shell, sigmaOf(s.shell)), s.frameW, s.frameH), this.f(s), cam.h, cam.p, cam.r);
     const { az, el } = azEl(D);
     return { ok: true, D, az, el, cam, warnings };
   }
 
-  /** The ray of a sighting: its aim, with the time before impact and the crater it starts from. */
+  /** The ray of a sighting: its aim, with the time before impact and the point it starts from. */
   solve(s: Sighting): SightingResult {
     const a = this.aim(s);
     if (!a.ok) return a;
     const { D, az, el, cam, warnings } = a;
     const shot = this.shots.get(s.shotId);
-    const T = shot?.impactTimeS[s.clipId];
-    if (T == null) return { ok: false, error: 'This clip has no impact mark. Mark the frame where the shell lands.', warnings };
-    const tau = T - s.timeS + (this.J ? this.J.impact(s.clipId) : 0);
+    const I = value(shot?.impact[s.clipId]);
+    if (I == null) return { ok: false, error: 'This clip has no impact mark. Mark the frame where the shell lands.', warnings };
+    const tau = impactTime(I) - s.timeS + (this.J ? this.J.impact(s.clipId, impactSigma(I)) : 0);
     if (tau <= 0) return { ok: false, error: 'This sighting is at or after the impact.', warnings };
-    const C = craterXyz(shot!, this.heights?.crater[shot!.id]);
-    if (!C) return { ok: false, error: 'The crater of this shot has no X and Y yet.', warnings };
-    // ponytail: the user stands at the height of the crater; the terrain at the position would be better on hills
-    const at = this.position(s);
-    const O: Vec3 = at ? [at.x * GAME_UNIT_M, at.y * GAME_UNIT_M, C[2] + EYE_HEIGHT_M] : [C[0], C[1], C[2] + EYE_HEIGHT_M];
-    return { ok: true, ray: { O, D, tau, clip: s.clipId, fixed: !!at }, az, el, cam, warnings };
+    const at = anchorGame(shot!);
+    if (!at) return { ok: false, error: 'The crater of this shot has no X and Y yet, and where you stood is not known either.', warnings };
+    // ponytail: the user stands at the height of the crater; the terrain at the observer would be better on hills
+    const C = toMeters(at, this.heights?.crater[shot!.id]);
+    const sigma = (sigmaOf(s.shell) ?? this.data.settings.markSigmaPx) / this.f(s);
+    return { ok: true, ray: { O: [C[0], C[1], C[2] + EYE_HEIGHT_M], D, tau, clip: s.clipId, sigma }, az, el, cam, warnings };
   }
 }

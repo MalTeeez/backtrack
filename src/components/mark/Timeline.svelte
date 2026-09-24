@@ -71,6 +71,7 @@
   import { lacks } from '../../lib/state/missing.ts';
   import { motionFlags } from '../../lib/solver/motion.ts';
   import UseToggle from '../UseToggle.svelte';
+  import { value } from '../../lib/solver/field.ts';
 
   let { time, clipId, frames, ongo, loop = $bindable(null) }: {
     time: number; clipId: Id | null; frames: number[] | undefined;
@@ -294,7 +295,7 @@
       {@const active = sh.id === ui.shotId}
       {@const color = shotColor(si)}
       {@const list = project.sightings.filter((s) => s.shotId === sh.id && s.clipId === clipId)}
-      {@const impact = clipId ? sh.impactTimeS[clipId] : undefined}
+      {@const impact = clipId ? value(sh.impact[clipId])?.b : undefined}
       <div class="flex min-w-0 items-center gap-1.5 border-b border-r border-line px-2 text-[12px] {active ? 'bg-[var(--accent-soft)] text-text' : 'text-muted'}" data-testid="lane-{si}">
         <button class="flex min-w-0 flex-1 items-center gap-1.5 text-left {sh.excluded ? 'opacity-50' : ''}" onclick={() => (ui.shotId = sh.id)} title="Mark sightings for {sh.name}">
           <span class="h-2.5 w-2.5 shrink-0" style="background:{color}"></span>
@@ -322,7 +323,7 @@
             {@const todo = lacks(s)}
             <button
               class="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 border-2 {todo.length || jumpy.has(s.id) ? 'border-warn' : active ? 'border-black/70' : 'border-black/40'} {s.excluded || sh.excluded ? 'opacity-25' : active ? '' : 'opacity-50'}"
-              style="left:{x(s.timeS)}; background:{s.shell ? color : 'var(--panel-solid)'}"
+              style="left:{x(s.timeS)}; background:{value(s.shell) ? color : 'var(--panel-solid)'}"
               title="Sighting of {sh.name} at {s.timeS.toFixed(3)} s{todo.length ? `, still needs: ${todo.join(', ')}` : ''}{jumpy.has(s.id) ? ', the shell jumps to this frame' : ''}{s.excluded ? ', left out of the calculation' : ''}"
               aria-label="Sighting of {sh.name} at {s.timeS.toFixed(3)} s"
               onclick={() => { ui.shotId = sh.id; if (clipId) ongo(clipId, s.timeS, s.id); }}

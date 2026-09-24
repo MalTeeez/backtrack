@@ -135,27 +135,50 @@ The app has no landmarks. Each sighting gets its camera from vertical edges (pit
 
 ## Positions, heights and time
 
-- **Position.** A sighting can take where the user stood from the minimap (`position`, typed or picked on a map); a
-  sighting that copies the previous camera copies it too, and its ray starts there. Otherwise the user enters no
-  position of their own. They stand near the crater and walk to it after the
-  impact. Every ray starts at eye height above the crater, and for each candidate flight `observerShift`
-  (`src/lib/solver/ballisticFit.ts`) finds the ground shift of the user in each clip by least squares. A 30 m shift
+- **Automatic values.** Every value that Backtrack can detect is a `Field` (`src/lib/solver/field.ts`, automation
+  plan section 2): the user's value (`manual`), and the detector's value with its sigma and a confidence (`auto`).
+  The user's value wins. An automatic value counts when its confidence is at least 50 percent; the confidence is 50
+  percent at the sigma limit of its kind. A user's value that differs from a confident automatic one by more than
+  3 sigma and a minimum per kind gets a warning. `FieldTag.svelte` shows the state (auto with the percent, required
+  with the reason, manual, differs) and a button back to the automatic value; `AutoNum.svelte` is a number field with
+  it. The shell mark draws in a color per state (`SHELL_COLORS` in `draw.ts`). Fields: heading, pitch, roll and
+  shell of a sighting, the impact and where the user stood of a shot in each clip, the crater, the map of a clip.
+  The Monte Carlo runs take the sigma of an automatic value, and the accuracy of the settings for the user's values.
+- **Position.** Where the user stood during the flight of a shot comes from the minimap (`observer`, a field per
+  clip; typed or picked on a map in Coordinates). Every ray starts at eye height above the crater, and for each
+  candidate flight `observerShift` (`src/lib/solver/ballisticFit.ts`) finds the ground shift of the user in each
+  clip by weighted least squares, each ray with its angular error times its distance. The minimap position is not
+  fixed: it pulls the shift toward itself with its error (10 m for a typed position, or the sigma of the automatic
+  one) plus the error of the crater, and a solved spot more than 3 of those and 10 m away gets a note. A 30 m shift
   that the solver ignored would move an L52 gun by about 100 m. With the shift, exact data gives the gun within 2 m.
-  The app assumes that the user did not move during the clip.
+  The app assumes that the user did not move during the flight.
 - **Crater.** The user gives each crater as X and Y, typed or clicked on a map of game coordinates
   (`CraterMap.svelte`), or as a rangefinder reading: where the user stood then, the compass heading and the distance
-  as the game shows it (`craterGame` in `src/lib/solver/sightings.ts`).
+  as the game shows it (`craterGame` in `src/lib/solver/sightings.ts`). Without a crater, where the user stood is
+  enough: the rays start there, and the crater is that spot minus the solved shift (`crater` of a shot result, with
+  the spread of the shift and the minimap error as its error). On exact synthetic data it lands within 3 m.
 - **Zoom.** A sighting of a frame seen through binoculars or a scope has a zoom: its field of view is the game FOV
   divided by the zoom, so the focal length is that many times longer. An optional suspected heading (the compass heading from the crater toward the gun) with a
-  tolerance limits the direction search to that window.
+  tolerance limits the direction search to that window. The coarse search keeps the least cost of each direction:
+  when a second minimum at least 15 deg away costs less than twice the best one (or than 0.1 deg per ray), the result
+  names both directions and the suspected heading becomes required (`secondMinimum`).
+- **Camera.** A sighting has a heading, a pitch and a roll. The pitch the user typed wins, then the pitch of the
+  marked edges, then the automatic pitch. Without a roll the camera is level. `cameraAxes` in `camera.ts` turns them
+  into axes; a positive roll turns the right axis toward up.
+- **Impact.** The user marks the first frame that shows the impact. The impact lies between the frame before it and
+  that frame, the solver takes the middle, and the Monte Carlo runs draw it anywhere in that interval.
 - **Clip files.** A clip downloads as its video plus `<video name>.backtrack.json` when it has marks. The upload takes
   both back: an annotation file joins the video of the same file name, or a clip with the name it records
-  (`src/lib/capture/annotation.ts`, `clipFiles.ts`).
+  (`src/lib/capture/annotation.ts`, `clipFiles.ts`). The file is version 2, with every field as stored, and the map of
+  the clip. The app reads only this version, and a saved project of another version (`DATA_VERSION`) does not load:
+  Backtrack is still in development. `bun scripts/solve-clip.ts <file>` solves a file as the app does.
 - **Map data.** `bun tools/fetch-map-data.ts` downloads the color map tiles (zoom 0 to 6) and the terrain chunks of
   Bakurani, Ozeti and Zestafona from the wardogs-calculator hosting into `local-data/` (about 920 MB).
   `local-data/` is committed, the dev and preview servers serve it at `/local-data/` (`vite.config.ts`), and the
-  build leaves it out. `src/lib/map/tiles.svelte.ts` draws the tiles under the crater map and the result map, for the
-  map in `settings.map`.
+  build leaves it out. `src/lib/map/tiles.svelte.ts` draws the tiles under the crater map and the result map. Each
+  clip has its map (`project.clips[id].map`): the Mark phase asks for it when a clip without one opens, the header
+  changes it, and the solver takes the terrain of the map of the clip it solves. The select at the bottom left of a map
+  panel shows another map in that panel only (`ui.mapShown`).
 - **Topography.** `bun tools/make-topo.ts [map ...]` renders shaded relief with height tints and contour lines from the
   calculator terrain into `local-data/topo/<id>/<z>/<x>_<y>.png`, zoom 0 to 5 (about 2 m per pixel), in the same
   pyramid as the color tiles. It takes about 12 s and 30 to 60 MB per map. Every map offers Color, Gray and Topo
@@ -221,6 +244,8 @@ The app has no landmarks. Each sighting gets its camera from vertical edges (pit
   skipped frame) cannot pull the flight toward itself. On synthetic data with mark and compass errors it is as
   accurate as squares; on the test clip it moved the gun of shot 1 from 88.6, 47.7 to 92.9, 46.7 with all sightings,
   next to the 93.8, 45.6 of shot 2, so the two shots now make one gun. The reported fit error stays the RMS.
+  Each miss counts in units of the error of its ray (automation plan section 12.5): its mark error, and a frame time
+  error of 5 ms (`TIMESTAMP_SIGMA_S`) times the speed of the shell across the image, against the median ray.
 - **Fit error.** The result shows the RMS miss of the rays in meters and in degrees. The "fit error is high" note only
   counts the angle beyond what a 10 m miss explains (`MODEL_M` in `ballisticFit.ts`): the shell is only 30 to 200 m
   away in the last frames, so a few meters of position or model error are several degrees there. On the test clip
@@ -248,6 +273,11 @@ RK4 in 0.01 s steps. The parameters are community estimates, not published by Bu
 |---|---|---|---|---|
 | L52 | 300 m/s | 4.807e-4 | -3 to 65 deg | Speed from the WARDOGS wiki. k matches the 2629 m maximum range. The flight times at 2000 m (11.6 s and 33.8 s) match the published 12.3 s and 33 s. |
 | L81 | 96.6 m/s | 5.429e-4 | 45 to 85 deg | Speed from the WARDOGS wiki. k matches the 691 m maximum range at 45 deg. The flight time at 400 m (16.9 s) matches the published 17.4 s. |
+
+Without a weapon picked, the solver solves every shot with each weapon table and takes the weapon whose RMS fit error
+is clearly lower (`pickWeapon` in `result.ts`, 50 percent sure at twice the error of the other weapon; errors below
+0.02 deg count as 0.02). The test clips: clip 2 L52 0.08 deg against L81 1.2 deg; clip 1 4.6 against 7.3 deg, unsure,
+because shot 1 has the frame timing problem. The user's pick wins, with a warning when it differs from a sure one.
 
 `fitBallistic` (`src/lib/solver/ballisticFit.ts`) searches two unknowns: the direction from the crater and the launch
 elevation. They fix the gun position and the whole flight, and the shift of the user follows from them. The search

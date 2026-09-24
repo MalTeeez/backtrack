@@ -7,14 +7,16 @@
   import type { ProjectResult } from '../../lib/solver/result.ts';
   import { theme } from '../../lib/state/theme.svelte.ts';
   import { drawTiles, mapInfo } from '../../lib/map/tiles.svelte.ts';
-  import type { Grid, MapId } from '../../lib/solver/types.ts';
+  import type { Grid, Id, MapId } from '../../lib/solver/types.ts';
   import { REACH, STEEP_DEG } from '../../lib/terrain/analysis.ts';
   import MapStyle from '../MapStyle.svelte';
   import { Maximize2 } from '@lucide/svelte';
   import MapChooser from '../MapChooser.svelte';
-  import { project, ui } from '../../lib/state/project.svelte.ts';
+  import { WEAPONS, clipInfo, clipMap, project, ui } from '../../lib/state/project.svelte.ts';
 
-  let { result, map }: { result: ProjectResult; map?: MapId } = $props();
+  let { result, map, clipId }: { result: ProjectResult; map?: MapId; clipId: Id | null } = $props();
+  // the range of the weapon the solve used: the settings for the user's pick, else the weapon's own
+  const range = $derived(project.settings.weapon ? [project.settings.rangeMinM, project.settings.rangeMaxM] : [WEAPONS[result.weapon.use].min, WEAPONS[result.weapon.use].max]);
 
   let tick = $state(0); // bumped when a map tile arrives
   let zoom = $state<string | null>(null); // the tile zoom drawn
@@ -158,7 +160,7 @@
     const gunName = (i: number) => (several ? `Gun ${i + 1}` : 'Gun');
     for (const [gi, center] of result.guns.entries()) {
       const [px, py] = T(center.x, center.y);
-      for (const [m, kind] of [[project.settings.rangeMinM, 'min range'], [project.settings.rangeMaxM, 'max range']] as const) {
+      for (const [m, kind] of [[range[0], 'min range'], [range[1], 'max range']] as const) {
         const name = several ? `${gunName(gi)} ${kind}` : kind[0].toUpperCase() + kind.slice(1);
         const rad = m * sc;
         g.setLineDash([8, 6]);
@@ -267,7 +269,7 @@
           {/each}
         </div>
       {/if}
-      <MapChooser />
+      <div title="Shows another map here only. The map of the clip stays."><MapChooser value={map} onpick={(m) => { if (m && m !== clipMap(clipId)) ui.mapShown.result = m; else delete ui.mapShown.result; }} /></div>
     </div>
-  {:else}<MapChooser big />{/if}
+  {:else}<MapChooser big value={undefined} auto={clipId ? project.clips[clipId]?.map.auto : undefined} onpick={(m) => { if (clipId) clipInfo(clipId).map.manual = m; }} />{/if}
 </div>

@@ -8,18 +8,22 @@
   import { compassRose, css } from './mark/draw.ts';
   import { drawTiles, mapInfo } from '../lib/map/tiles.svelte.ts';
   import { SOURCE_TOL_DEG } from '../lib/solver/sightings.ts';
-  import type { Id, MapId, Shot } from '../lib/solver/types.ts';
+  import type { Id, Shot } from '../lib/solver/types.ts';
   import { theme } from '../lib/state/theme.svelte.ts';
-  import { ui } from '../lib/state/project.svelte.ts';
+  import { clipInfo, clipMap, project, ui } from '../lib/state/project.svelte.ts';
+  import { untrack } from 'svelte';
   import MapStyle from './MapStyle.svelte';
   import MapChooser from './MapChooser.svelte';
   import { craterGame } from '../lib/solver/sightings.ts';
 
-  let { viewId, shot, reachM, map, onpick, observer }: {
-    /** Where the view is kept (ui.mapViews): the shot for the crater, the sighting for where the user stood. */
-    viewId: Id; shot: Shot; reachM: number; map: MapId | undefined;
+  let { viewId, shot, reachM, onpick, observer }: {
+    /** Where the view is kept (ui.mapViews): the shot for the crater, the shot and "obs" for where the user stood. */
+    viewId: Id; shot: Shot; reachM: number;
     onpick?: (p: { x: number; y: number }) => void; observer?: { x?: number; y?: number } | null;
   } = $props();
+  // the map of the clip of the shot, unless this panel shows another one (automation plan section 4)
+  const clipMapId = $derived(clipMap(shot.clipId));
+  const map = $derived(ui.mapShown[viewId] ?? clipMapId);
   const seen = $derived(observer?.x != null && observer?.y != null ? { x: observer.x, y: observer.y } : null);
 
   let canvas: HTMLCanvasElement;
@@ -53,7 +57,7 @@
   // weapon range, and the wheel and drags change it.
   const fit = () => ({ cx: seen?.x ?? crater?.x ?? 80, cy: seen?.y ?? crater?.y ?? 80, span: onpick ? 6 : (reachM * 2.2) / 100 || 30 });
   // the map opens where the user left it
-  let view = $state(ui.mapViews[viewId] || fit());
+  let view = $state(untrack(() => ui.mapViews[viewId] || fit()));
   $effect(() => { ui.mapViews[viewId] = { ...view }; });
   const scale = $derived(Math.min(width, H) / view.span); // px per game unit
   const toPx = (x: number, y: number): [number, number] => [width / 2 + (x - view.cx) * scale, H / 2 - (y - view.cy) * scale];
@@ -121,7 +125,7 @@
     if (press && !press.moved) {
       const p = toGame(e), at = { x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 };
       if (onpick) onpick(at);
-      else shot.crater = at;
+      else { shot.crater.manual = at; shot.rangefinder = undefined; }
     }
     press = null;
   }
@@ -152,9 +156,13 @@
   </span>
   <button class="btn sm absolute left-1.5 top-1" onclick={() => (view = fit())} title="Back to the crater and the weapon range">Fit</button>
   <div class="absolute bottom-1.5 right-1.5"><MapStyle /></div>
-  {#if map}<div class="absolute bottom-1.5 left-1.5 w-36"><MapChooser /></div>{/if}
+  {#if map}
+    <div class="absolute bottom-1.5 left-1.5 w-36" title="Shows another map in this panel only. The map of the clip stays.">
+      <MapChooser value={map} onpick={(m) => { if (m && m !== clipMapId) ui.mapShown[viewId] = m; else delete ui.mapShown[viewId]; }} />
+    </div>
+  {/if}
   {#if !map}
-    <MapChooser big />
+    <MapChooser big value={undefined} auto={shot.clipId ? project.clips[shot.clipId]?.map.auto : undefined} onpick={(m) => { if (shot.clipId) clipInfo(shot.clipId).map.manual = m; }} />
   {:else if !loadedInfo}
     <span class="pointer-events-none absolute left-1/2 top-1 -translate-x-1/2 border border-line bg-panel px-1.5 text-[11px] text-warn">No map image. Run bun tools/fetch-map-data.ts.</span>
   {/if}

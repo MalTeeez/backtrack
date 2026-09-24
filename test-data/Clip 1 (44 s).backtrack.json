@@ -1,6 +1,6 @@
 {
   "format": "backtrack-annotation",
-  "version": 1,
+  "version": 2,
   "clip": {
     "name": "Clip 1 (44 s)",
     "source": "buffer",
@@ -10,29 +10,58 @@
     "createdAt": 1790125743518,
     "bytes": 54687184
   },
+  "data": {
+    "map": {
+      "manual": "ozeti"
+    }
+  },
   "settings": {
     "fovDeg": 100,
     "fovAxis": "h",
-    "weapon": "L52"
+    "weapon": "L52",
+    "rangeMinM": 600,
+    "rangeMaxM": 2600,
+    "limitToRange": true
   },
   "shots": [
     {
       "name": "Shot 1",
       "crater": {
-        "x": 97.41,
-        "y": 65.46
+        "manual": {
+          "x": 97.41,
+          "y": 65.46
+        }
       },
       "sourceDeg": 205,
-      "impactTimeS": 40.151
+      "impact": {
+        "manual": {
+          "a": 40.064,
+          "b": 40.151
+        }
+      },
+      "observer": null
     },
     {
       "name": "Shot 2",
       "crater": {
-        "x": 97.39,
-        "y": 65.51
+        "manual": {
+          "x": 97.39,
+          "y": 65.51
+        }
       },
       "sourceDeg": 205,
-      "impactTimeS": 26.112
+      "impact": {
+        "manual": {
+          "a": 26.026,
+          "b": 26.112
+        }
+      },
+      "observer": {
+        "manual": {
+          "x": 97.42,
+          "y": 65.72
+        }
+      }
     }
   ],
   "sightings": [
@@ -41,6 +70,12 @@
       "timeS": 24.626,
       "frameW": 3840,
       "frameH": 2160,
+      "shell": {
+        "manual": {
+          "x": 1828.92,
+          "y": 1247.2
+        }
+      },
       "edges": [
         [
           {
@@ -103,22 +138,24 @@
           }
         ]
       ],
-      "sameCameraAsPrevious": false,
-      "shell": {
-        "x": 1828.92,
-        "y": 1247.2
+      "heading": {
+        "manual": 196
       },
-      "headingDeg": 196,
-      "position": {
-        "x": 97.42,
-        "y": 65.72
-      }
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": false
     },
     {
       "shot": "Shot 2",
       "timeS": 25.156,
       "frameW": 3840,
       "frameH": 2160,
+      "shell": {
+        "manual": {
+          "x": 1828.67,
+          "y": 1296.53
+        }
+      },
       "edges": [
         [
           {
@@ -171,22 +208,24 @@
           }
         ]
       ],
-      "sameCameraAsPrevious": false,
-      "shell": {
-        "x": 1828.67,
-        "y": 1296.53
+      "heading": {
+        "manual": 197
       },
-      "headingDeg": 197,
-      "position": {
-        "x": 97.39,
-        "y": 65.71
-      }
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": false
     },
     {
       "shot": "Shot 2",
       "timeS": 25.242,
       "frameW": 3840,
       "frameH": 2160,
+      "shell": {
+        "manual": {
+          "x": 1834.13,
+          "y": 1306.72
+        }
+      },
       "edges": [
         [
           {
@@ -229,22 +268,24 @@
           }
         ]
       ],
-      "sameCameraAsPrevious": false,
-      "shell": {
-        "x": 1834.13,
-        "y": 1306.72
+      "heading": {
+        "manual": 197
       },
-      "headingDeg": 197,
-      "position": {
-        "x": 97.44,
-        "y": 65.72
-      }
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": false
     },
     {
       "shot": "Shot 2",
       "timeS": 25.398,
       "frameW": 3840,
       "frameH": 2160,
+      "shell": {
+        "manual": {
+          "x": 1845.7,
+          "y": 1333.42
+        }
+      },
       "edges": [
         [
           {
@@ -297,22 +338,24 @@
           }
         ]
       ],
-      "sameCameraAsPrevious": false,
-      "shell": {
-        "x": 1845.7,
-        "y": 1333.42
+      "heading": {
+        "manual": 197
       },
-      "headingDeg": 197,
-      "position": {
-        "x": 97.4,
-        "y": 65.71
-      }
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": false
     },
     {
       "shot": "Shot 1",
       "timeS": 39.378,
       "frameW": 3840,
       "frameH": 2160,
+      "shell": {
+        "manual": {
+          "x": 3230.25,
+          "y": 938.9
+        }
+      },
       "edges": [
         [
           {
@@ -355,104 +398,131 @@
           }
         ]
       ],
-      "sameCameraAsPrevious": false,
-      "shell": {
-        "x": 3230.25,
-        "y": 938.9
+      "heading": {
+        "manual": 136
       },
-      "headingDeg": 136,
-      "headingAuto": 136
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": false
     },
     {
       "shot": "Shot 1",
       "timeS": 39.473,
       "frameW": 3840,
       "frameH": 2160,
-      "edges": [],
-      "sameCameraAsPrevious": true,
       "shell": {
-        "x": 3156.2,
-        "y": 973.2
+        "manual": {
+          "x": 3156.2,
+          "y": 973.2
+        }
       },
-      "headingAuto": 136
+      "edges": [],
+      "heading": {},
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": true
     },
     {
       "shot": "Shot 1",
       "timeS": 39.559,
       "frameW": 3840,
       "frameH": 2160,
-      "edges": [],
-      "sameCameraAsPrevious": true,
       "shell": {
-        "x": 3078.55,
-        "y": 1016.54
+        "manual": {
+          "x": 3078.55,
+          "y": 1016.54
+        }
       },
-      "headingAuto": 136
+      "edges": [],
+      "heading": {},
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": true
     },
     {
       "shot": "Shot 1",
       "timeS": 39.643,
       "frameW": 3840,
       "frameH": 2160,
-      "edges": [],
-      "sameCameraAsPrevious": true,
       "shell": {
-        "x": 2993.66,
-        "y": 1061.68
+        "manual": {
+          "x": 2993.66,
+          "y": 1061.68
+        }
       },
-      "headingAuto": 136
+      "edges": [],
+      "heading": {},
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": true
     },
     {
       "shot": "Shot 1",
       "timeS": 39.732,
       "frameW": 3840,
       "frameH": 2160,
-      "edges": [],
-      "sameCameraAsPrevious": true,
       "shell": {
-        "x": 2861.83,
-        "y": 1137.52
+        "manual": {
+          "x": 2861.83,
+          "y": 1137.52
+        }
       },
-      "headingAuto": 136
+      "edges": [],
+      "heading": {},
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": true
     },
     {
       "shot": "Shot 1",
       "timeS": 39.815,
       "frameW": 3840,
       "frameH": 2160,
-      "edges": [],
-      "sameCameraAsPrevious": true,
       "shell": {
-        "x": 2831.13,
-        "y": 1153.77
+        "manual": {
+          "x": 2831.13,
+          "y": 1153.77
+        }
       },
-      "headingAuto": 136
+      "edges": [],
+      "heading": {},
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": true
     },
     {
       "shot": "Shot 1",
       "timeS": 39.897,
       "frameW": 3840,
       "frameH": 2160,
-      "edges": [],
-      "sameCameraAsPrevious": true,
       "shell": {
-        "x": 2292.53,
-        "y": 1477.51
+        "manual": {
+          "x": 2292.53,
+          "y": 1477.51
+        }
       },
-      "headingAuto": 136
+      "edges": [],
+      "heading": {},
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": true
     },
     {
       "shot": "Shot 1",
       "timeS": 39.977,
       "frameW": 3840,
       "frameH": 2160,
-      "edges": [],
-      "sameCameraAsPrevious": true,
       "shell": {
-        "x": 2143.43,
-        "y": 1568.72
+        "manual": {
+          "x": 2143.43,
+          "y": 1568.72
+        }
       },
-      "headingAuto": 136
+      "edges": [],
+      "heading": {},
+      "pitch": {},
+      "roll": {},
+      "sameCameraAsPrevious": true
     }
   ]
 }

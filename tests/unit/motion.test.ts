@@ -20,8 +20,8 @@ function run(seed: number, stallAt = -1, repeatAt = -1, from = 0.8) {
     const t = tr.fireTime + tr.T * from + i / 12;
     const px = shellPx(tr, t + (stallAt >= 0 && i >= stallAt ? 0.25 : 0) - (i === repeatAt ? 1 / 12 : 0))!;
     p.sightings.push({
-      ...first, id: `s${i}`, timeS: t, shell: { x: px.x + n(), y: px.y + n() },
-      edges: i ? [] : first.edges, headingDeg: i ? undefined : first.headingDeg, sameCameraAsPrevious: i > 0,
+      ...first, id: `s${i}`, timeS: t, shell: { manual: { x: px.x + n(), y: px.y + n() } },
+      edges: i ? [] : first.edges, heading: i ? {} : first.heading, sameCameraAsPrevious: i > 0,
     });
   }
   return p;

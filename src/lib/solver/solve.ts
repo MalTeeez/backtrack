@@ -11,7 +11,7 @@ export function solveShot(rays: Ray[], C: Vec3, opt: SolveOptions): ShotSolution
   const full = opt.center == null;
   const lo = full ? 0 : opt.center! - opt.tol, hi = full ? 360 : opt.center! + opt.tol;
   const search = (strict: boolean, ground: boolean) =>
-    fitBallistic(opt.ballistics, rays, { C, zGun: opt.zGun, lo, hi, range: strict ? [opt.rmin, opt.rmax] : null, ground: ground ? opt.ground : undefined, near: opt.near });
+    fitBallistic(opt.ballistics, rays, { C, zGun: opt.zGun, lo, hi, range: strict ? [opt.rmin, opt.rmax] : null, ground: ground ? opt.ground : undefined, near: opt.near, priors: opt.priors });
 
   // first with the range limit and the terrain, then without the range limit, and last without the terrain
   let rangeApplied = opt.useRange, fit = search(rangeApplied, true);

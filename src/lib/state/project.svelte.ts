@@ -1,14 +1,15 @@
 /** Project data and UI state (runes). App.svelte saves both to IndexedDB (see persistence.ts). */
-import type { ClipMeta, Id, ProjectData, Settings, Shot, Sighting, Weapon } from '../solver/types.ts';
+import type { ClipData, ClipMeta, Id, MapId, ProjectData, Settings, Shot, Sighting } from '../solver/types.ts';
 import { freeShot, oneClipPerShot } from '../capture/annotation.ts';
 import { sameFrame } from '../video/frames.ts';
+import { value } from '../solver/field.ts';
 
 import { WEAPONS } from '../solver/ballistics.ts';
 export { WEAPONS };
 
 export const DEFAULT_SETTINGS: Settings = {
   fovDeg: 90, fovAxis: 'h',
-  weapon: 'L52', rangeMinM: WEAPONS.L52.min, rangeMaxM: WEAPONS.L52.max, limitToRange: true,
+  rangeMinM: WEAPONS.L52.min, rangeMaxM: WEAPONS.L52.max, limitToRange: true,
   bufferS: 40, bitrateMbps: 25,
   markSigmaPx: 1, compassSigmaDeg: 0.5,
 };
@@ -21,10 +22,20 @@ export type Tool = 'shell' | 'edge' | null;
 
 export const uid = (): Id => crypto.randomUUID().slice(0, 8);
 
-export const newShot = (n: number): Shot => ({ id: uid(), name: `Shot ${n}`, crater: {}, impactTimeS: {} });
+export const newShot = (n: number): Shot => ({ id: uid(), name: `Shot ${n}`, crater: {}, impact: {}, observer: {} });
+
+/** A new sighting on a frame, with every field empty. */
+export const newSighting = (s: Pick<Sighting, 'shotId' | 'clipId' | 'timeS' | 'frameW' | 'frameH'>): Sighting =>
+  ({ id: uid(), ...s, shell: {}, edges: [], heading: {}, pitch: {}, roll: {}, sameCameraAsPrevious: false });
+
+/**
+ * The version of the saved project. The data of another version does not load: Backtrack is still in development and
+ * keeps no old formats (automation plan section 3).
+ */
+export const DATA_VERSION = 2;
 
 export function emptyProject(): ProjectData {
-  return { settings: { ...DEFAULT_SETTINGS }, shots: [newShot(1)], sightings: [] };
+  return { settings: { ...DEFAULT_SETTINGS }, clips: {}, shots: [newShot(1)], sightings: [] };
 }
 
 export const project: ProjectData = $state(emptyProject());
@@ -49,6 +60,10 @@ export interface Ui {
   /** The map panels by shot (crater) or sighting (where the user stood): open or not, and their view. */
   mapOpen: Record<Id, boolean>;
   mapViews: Record<Id, MapView>;
+  /** A map panel that shows another map than its clip, by panel (automation plan section 4). */
+  mapShown: Record<Id, MapId>;
+  /** Clips whose map prompt the user closed without a map. */
+  mapAsked: Record<Id, boolean>;
 }
 type Span = { a: number; b: number };
 export type MapView = { cx: number; cy: number; span: number };
@@ -57,9 +72,10 @@ export type ClipView = { t?: number; zoom?: Span; loop?: Span };
 export const ui: Ui = $state({
   phase: 'record', shotId: null, clipId: null, sightingId: null, tool: null, split: false,
   clipViews: {}, speed: 1, magZoom: 8, folded: {}, resultView: null, layers: { steep: true, out: true, high: true }, mapOpen: {}, mapViews: {},
+  mapShown: {}, mapAsked: {},
 });
 /** The view of a clip, made on first use. Not for use inside $derived, which may not change state. */
-export const clipView = (id: Id): ClipView => (ui.clipViews[id] ??= {});
+export const clipView = (id: Id): ClipView => { ui.clipViews[id] ??= {}; return ui.clipViews[id]; };
 
 /** Saved clips, newest first. The video blobs stay in IndexedDB (see persistence.ts). */
 export const clips: { list: ClipMeta[] } = $state({ list: [] });
@@ -69,11 +85,18 @@ export const currentShot = (): Shot => project.shots.find((s) => s.id === ui.sho
 /** The shots of a clip. Without a clip, the new shots that no clip has taken yet. */
 export const shotsOf = (clipId: Id | null): Shot[] => project.shots.filter((s) => (s.clipId ?? null) === clipId);
 
+/** What the project knows about a clip, made on first use. Not for use inside $derived, which may not change state. */
+export const clipInfo = (id: Id): ClipData => { project.clips[id] ??= { map: {} }; return project.clips[id]; };
+
+/** The map of a clip: the user's pick, else the one the minimap search is sure of. */
+export const clipMap = (id: Id | null | undefined): MapId | undefined => (id ? value(project.clips[id]?.map) : undefined);
+
 /** The project as the selected clip sees it: its shots and their sightings. The solver and the checks use it. */
 export function clipData(): ProjectData {
   const ids = new Set(shotsOf(ui.clipId).map((s) => s.id));
   return {
     settings: project.settings,
+    clips: ui.clipId && project.clips[ui.clipId] ? { [ui.clipId]: project.clips[ui.clipId] } : {},
     shots: project.shots.filter((s) => ids.has(s.id)),
     sightings: project.sightings.filter((s) => ids.has(s.shotId) && s.clipId === ui.clipId),
   };
@@ -98,30 +121,16 @@ export function fixShot() {
   else addShot();
 }
 
-/** The shape of older saved projects: landmarks, positions, heights, spray and a custom weapon. */
-interface OldData {
-  sightings?: (Sighting & { positionId?: Id; landmark?: unknown })[];
-  shots?: (Shot & Record<string, unknown>)[];
-  settings?: Partial<Settings> & { fps?: number };
-}
-
 /**
  * Replaces the whole project, for example after loading. The caller then sets the clip list and calls fixShot, so the
  * UI state points only at things that exist.
  */
 export function loadProject(data: ProjectData, saved?: Partial<Ui>) {
-  const old = data as unknown as OldData;
-  const { fps: _fps, ...settings } = { ...DEFAULT_SETTINGS, ...old.settings };
-  if (!(settings.weapon in WEAPONS)) settings.weapon = DEFAULT_SETTINGS.weapon;
-  const sightings = (old.sightings ?? []).map(({ landmark: _l, positionId: _p, ...s }) => s);
-  const shots = (old.shots ?? []).map((s) => ({
-    id: s.id, name: s.name, crater: { x: s.crater?.x, y: s.crater?.y, from: s.crater?.from }, impactTimeS: s.impactTimeS ?? {},
-    sourceDeg: s.sourceDeg, sourceTolDeg: s.sourceTolDeg, excluded: s.excluded, clipId: s.clipId,
-  }));
-  Object.assign(project, { settings, shots, sightings });
+  const settings: Settings = { ...DEFAULT_SETTINGS, ...data.settings };
+  if (settings.weapon && !(settings.weapon in WEAPONS)) settings.weapon = undefined;
+  Object.assign(project, { settings, clips: data.clips ?? {}, shots: data.shots, sightings: data.sightings });
   oneClipPerShot(project, { uid });
-  const { landmarkId: _, ...rest } = (saved ?? {}) as Partial<Ui> & { landmarkId?: unknown };
-  Object.assign(ui, rest, { tool: null });
+  Object.assign(ui, saved ?? {}, { tool: null });
 }
 
 /** These delete a thing and everything that points at it. */
@@ -142,7 +151,8 @@ export function deleteSighting(id: Id) {
 /** Deletes a clip with its sightings, impact marks and shots. */
 export function forgetClip(id: Id) {
   project.sightings = project.sightings.filter((s) => s.clipId !== id);
-  for (const s of project.shots) delete s.impactTimeS[id];
+  for (const s of project.shots) { delete s.impact[id]; delete s.observer[id]; }
+  delete project.clips[id];
   project.shots = project.shots.filter((s) => s.clipId !== id);
   clips.list = clips.list.filter((c) => c.id !== id);
   if (ui.clipId === id) ui.clipId = clips.list[0]?.id ?? null;

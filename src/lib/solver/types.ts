@@ -5,6 +5,19 @@ export type Id = string;
 export interface Pt { x: number; y: number }
 /** A point in world meters. X points east, Y north and Z up. */
 export type Vec3 = [number, number, number];
+/** A point on the map in game units (1 unit is 100 m). */
+export interface XY { x: number; y: number }
+
+/**
+ * What a detector found for a value (automation plan section 2): the value, its standard deviation in the unit of the
+ * value, and a confidence from 0 to 1. Below REQUIRED_BELOW (field.ts) the value does not count, and `reason` says why.
+ */
+export interface Detected<T> { value?: T; sigma?: number; conf: number; reason?: string }
+/** A value Backtrack can detect and the user can override. The user's value always wins. */
+export interface Field<T> { manual?: T; auto?: Detected<T> }
+
+/** The impact lies between the last clean frame `a` and the first frame with a change near the crater `b` (s). */
+export interface Impact { a: number; b: number }
 
 export interface Clip {
   id: Id; name: string; source: 'buffer' | 'upload';
@@ -21,26 +34,41 @@ export type MapId = 'bakurani' | 'ozeti' | 'zestafona';
 
 export interface Settings {
   fovDeg: number; fovAxis: 'h' | 'v';
-  weapon: Weapon; rangeMinM: number; rangeMaxM: number; limitToRange: boolean;
-  /** The map the clips come from. Absent means no map imagery. */
-  map?: MapId;
+  /**
+   * The weapon the user picked, with its range limits. Absent: the solver tries every weapon and takes the one that
+   * fits clearly better (automation plan section 12.4), each with its own range.
+   */
+  weapon?: Weapon; rangeMinM: number; rangeMaxM: number; limitToRange: boolean;
   bufferS: number; bitrateMbps: number;
   markSigmaPx: number; compassSigmaDeg: number;
 }
 
+/** What the project knows about a clip besides its marks. */
+export interface ClipData {
+  /** The map the clip comes from: its image under the maps, and its terrain for the solver. */
+  map: Field<MapId>;
+}
+
+/** A rangefinder reading: where the user stood (game units), a compass heading (deg) and a distance (m). */
+export interface Rangefinder { x?: number; y?: number; headingDeg?: number; distanceM?: number }
+
 export interface Shot {
   id: Id; name: string;
-  /**
-   * The crater in game units. With `from`, a rangefinder measured it instead: from where the user stood then (game
-   * units), at a compass heading (deg) and a distance (m), and x and y do not count.
-   */
-  crater: { x?: number; y?: number; from?: { x?: number; y?: number; headingDeg?: number; distanceM?: number } };
+  /** The crater in game units. A complete rangefinder reading gives the user's value instead of `crater.manual`. */
+  crater: Field<XY>;
+  rangefinder?: Rangefinder;
   /** The suspected compass heading (deg) from the crater toward the gun, and how far off (+/- deg) it may be. */
   sourceDeg?: number;
   sourceTolDeg?: number;
   /** Left out of the calculation, to test what it changes. */
   excluded?: boolean;
-  impactTimeS: Record<Id, number>; // clipId -> seconds
+  /** The impact in each clip (clipId). */
+  impact: Record<Id, Field<Impact>>;
+  /**
+   * Where the user stood during the flight in each clip (clipId), from the minimap. The solver takes it with an
+   * uncertainty; without it, the solver finds the spot from the crater.
+   */
+  observer: Record<Id, Field<XY>>;
   /** The clip the shot belongs to (one clip for now). None only for a new shot while no clip has taken it. */
   clipId?: Id;
 }
@@ -48,16 +76,15 @@ export interface Shot {
 export interface Sighting {
   id: Id; shotId: Id; clipId: Id; timeS: number;
   frameW: number; frameH: number;
-  shell?: Pt;
+  shell: Field<Pt>;
+  /** Vertical edges the user marked. They give the pitch in place of the automatic one. */
   edges: [Pt, Pt][];
-  headingDeg?: number;
+  /** The camera (deg): compass heading, pitch (up positive) and roll. Without a roll the camera is level. */
+  heading: Field<number>;
+  pitch: Field<number>;
+  roll: Field<number>;
   /** The zoom of binoculars or a scope on this frame: the field of view is the game FOV divided by it. 1 without. */
   zoom?: number;
-  /**
-   * Where the user stood on this frame, from the minimap (game units). Without it, the solver estimates the spot near
-   * the crater. A sighting with the same camera as the previous one also has its position.
-   */
-  position?: { x?: number; y?: number };
   sameCameraAsPrevious: boolean;
   /** Left out of the calculation, to test what it changes. */
   excluded?: boolean;
@@ -66,6 +93,8 @@ export interface Sighting {
 /** Everything the solver needs about a project. */
 export interface ProjectData {
   settings: Settings;
+  /** By clip id. */
+  clips: Record<Id, ClipData>;
   shots: Shot[];
   sightings: Sighting[];
 }
@@ -81,13 +110,16 @@ export interface Heights {
 
 /**
  * One line of sight to the shell: its origin (above the crater), its unit direction, the seconds before impact, and
- * its clip. The solver finds where the user stood in each clip.
+ * its clip. The solver finds where the user stood in each clip. `sigma` is the angular error (rad) of the ray: its
+ * mark, and the error of its frame time at the speed the shell moves across the image (section 12.5).
  */
-export interface Ray {
-  O: Vec3; D: Vec3; tau: number; clip: Id;
-  /** The origin is where the user stood (from the minimap), so the solver does not move it. */
-  fixed?: boolean;
-}
+export interface Ray { O: Vec3; D: Vec3; tau: number; clip: Id; sigma?: number }
+
+/**
+ * Where the user stood in a clip, as a shift (m) from the crater that the solver pulls the fit toward, and its
+ * standard deviation (m).
+ */
+export interface ShiftPrior { s: [number, number]; sigma: number }
 
 /**
  * A fit with the weapon ballistics: direction th, launch elevation e (deg), range R (m), flight time T (s), and the
@@ -95,6 +127,9 @@ export interface Ray {
  */
 export interface Fit {
   th: number; e: number; R: number; T: number; rms: number; shifts: Record<Id, [number, number]>;
+  /** The robust cost of the fit, and the second-best minimum over direction of the coarse search (section 12.3). */
+  cost: number;
+  second?: { th: number; cost: number; best: number };
   /** The RMS miss of the rays (m), and the RMS of their angle beyond what a miss of 10 m explains (deg). */
   missM: number; excess: number;
   /**
@@ -127,6 +162,8 @@ export interface SolveOptions {
   ground?: GroundAt;
   /** A known fit to search around (the Monte Carlo runs), instead of every direction and elevation. */
   near?: { th: number; e: number };
+  /** Where the minimap puts the user in each clip, as a shift from the crater. */
+  priors?: Record<Id, ShiftPrior>;
 }
 
 export type ShotSolution =

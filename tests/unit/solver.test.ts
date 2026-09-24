@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { centered, dirTo, focalPx, pitchFromEdge, project, rayWorld } from '../../src/lib/solver/camera.ts';
+import { secondMinimum } from '../../src/lib/solver/ballisticFit.ts';
 import { BALLISTICS, landing, simulate } from '../../src/lib/solver/ballistics.ts';
 import { seeded } from '../../src/lib/solver/montecarlo.ts';
 import { fuse, solveProject } from '../../src/lib/solver/result.ts';
@@ -25,6 +26,17 @@ describe('camera', () => {
     const d = rayWorld(centered(px, tr.W, tr.H), tr.f, tr.camH, tr.camP);
     const want = dirTo(tr.O, P);
     for (let i = 0; i < 3; i++) expect(d[i]).toBeCloseTo(want[i], 9);
+  });
+
+  test('a projected point comes back as the same ray with a rolled camera too', () => {
+    const P: [number, number, number] = [2500, 4300, 300];
+    const px = project(P, tr.O, tr.W, tr.H, tr.f, tr.camH, tr.camP, 2.5)!;
+    const d = rayWorld(centered(px, tr.W, tr.H), tr.f, tr.camH, tr.camP, 2.5);
+    const want = dirTo(tr.O, P);
+    for (let i = 0; i < 3; i++) expect(d[i]).toBeCloseTo(want[i], 9);
+    // a positive roll turns the right axis toward up: a point on the right side of the frame moves down
+    const ahead: [number, number, number] = [tr.O[0] + 100 * Math.sin(((tr.camH + 20) * Math.PI) / 180), tr.O[1] + 100 * Math.cos(((tr.camH + 20) * Math.PI) / 180), tr.O[2]];
+    expect(project(ahead, tr.O, tr.W, tr.H, tr.f, tr.camH, 0, 3)!.y).toBeGreaterThan(project(ahead, tr.O, tr.W, tr.H, tr.f, tr.camH, 0, 0)!.y);
   });
 
   test('pitch from a vertical edge is exact', () => {
@@ -131,12 +143,13 @@ describe('sightings', () => {
   });
 
   test('a rangefinder reading puts the crater at the heading and distance from where the user stood', () => {
-    const shot = { id: 's', name: 'Shot 1', impactTimeS: {}, crater: { from: { x: 10, y: 20, headingDeg: 90, distanceM: 500 } } };
+    const shot = { crater: { manual: { x: 1, y: 1 } }, rangefinder: { x: 10, y: 20, headingDeg: 90, distanceM: 500 } };
     expect(craterGame(shot)!.x).toBeCloseTo(15, 9);
     expect(craterGame(shot)!.y).toBeCloseTo(20, 9);
-    shot.crater.from.headingDeg = 0;
+    shot.rangefinder.headingDeg = 0;
     expect(craterGame(shot)!.y).toBeCloseTo(25, 9);
-    expect(craterGame({ ...shot, crater: { from: { x: 10, y: 20, headingDeg: 90 } } })).toBeNull();
+    expect(craterGame({ ...shot, rangefinder: { x: 10, y: 20, headingDeg: 90 } })).toBeNull();
+    expect(craterGame({ crater: shot.crater })).toEqual({ x: 1, y: 1 });
   });
 
   test('a zoomed frame gives the same directions when its marks are zoomed too', () => {
@@ -144,7 +157,7 @@ describe('sightings', () => {
     const s = data.sightings[1], plain = new SightingSolver(data).aim(s);
     // the same camera through a 4x zoom: every mark lies 4 times as far from the center of the frame
     const zoom = (p: { x: number; y: number }) => ({ x: tr.W / 2 + (p.x - tr.W / 2) * 4, y: tr.H / 2 + (p.y - tr.H / 2) * 4 });
-    Object.assign(s, { zoom: 4, shell: zoom(s.shell!), edges: s.edges.map(([a, b]) => [zoom(a), zoom(b)]) });
+    Object.assign(s, { zoom: 4, shell: { manual: zoom(s.shell.manual!) }, edges: s.edges.map(([a, b]) => [zoom(a), zoom(b)]) });
     const zoomed = new SightingSolver(data).aim(s);
     if (!plain.ok || !zoomed.ok) throw new Error('no aim');
     expect(zoomed.az).toBeCloseTo(plain.az, 6);
@@ -153,7 +166,7 @@ describe('sightings', () => {
 
   test('"same camera as previous" copies the earlier camera', () => {
     const data = sceneProject(tr, { n: 4 });
-    for (const s of data.sightings.slice(1)) { s.edges = []; s.headingDeg = undefined; s.sameCameraAsPrevious = true; }
+    for (const s of data.sightings.slice(1)) { s.edges = []; s.heading = {}; s.sameCameraAsPrevious = true; }
     const r = new SightingSolver(data).solve(data.sightings[3]);
     if (!r.ok) throw new Error(r.error);
     expect(r.cam.source).toBe('copied');
@@ -164,9 +177,13 @@ describe('sightings', () => {
     const data = sceneProject(tr, { n: 3 });
     const s = data.sightings[0];
     const solver = () => new SightingSolver(data);
-    s.headingDeg = undefined; s.edges = [];
+    s.heading = {}; s.edges = [];
     expect((solver().solve(s) as { error: string }).error).toContain('has no camera data');
-    s.headingDeg = tr.camH;
+    // an automatic heading too unsure to count is no heading
+    s.heading = { auto: { value: tr.camH, sigma: 2, conf: 0.1 } };
+    s.edges = tr.edges;
+    expect((solver().solve(s) as { error: string }).error).toContain('has no heading');
+    s.heading = { manual: tr.camH };
     // a short edge near the center gives an imprecise pitch
     s.edges = [[{ x: 650, y: 400 }, { x: 650.5, y: 380 }]];
     expect(solver().solve(s).warnings[0]).toContain('only accurate to');
@@ -175,11 +192,28 @@ describe('sightings', () => {
     expect(solver().solve(s).warnings.some((w) => w.includes('differs'))).toBe(false);
     s.edges = [tr.edges[0], tr.edges[1], [tr.edges[1][0], { x: tr.edges[1][1].x + 120, y: tr.edges[1][1].y }]];
     expect(solver().solve(s).warnings.some((w) => w.includes('Edge 3 differs'))).toBe(true);
-    data.shots[0].impactTimeS = {};
+    data.shots[0].impact = {};
     expect((solver().solve(s) as { error: string }).error).toContain('no impact mark');
-    data.shots[0].impactTimeS = { clip: 100 };
-    data.shots[0].crater = { x: 1 };
+    data.shots[0].impact = { clip: { manual: { a: 99.9, b: 100 } } };
+    data.shots[0].crater = {};
     expect((solver().solve(s) as { error: string }).error).toContain('The crater of this shot has no X and Y');
+  });
+
+  test('an automatic pitch and roll replace the edges', () => {
+    // the same scene through a camera with a roll: the marks move, and the automatic camera knows the roll
+    const roll = 1.5, data = sceneProject(tr, { n: 8 });
+    for (const s of data.sightings) {
+      const P = tr.shellAt(tr.fireTime + (s.timeS - tr.fireTime))!;
+      s.shell = { auto: { value: project(P, tr.O, tr.W, tr.H, tr.f, tr.camH, tr.camP, roll)!, sigma: 0.5, conf: 0.9 } };
+      s.edges = [];
+      s.pitch = { auto: { value: tr.camP, sigma: 0.05, conf: 0.95 } };
+      s.roll = { auto: { value: roll, sigma: 0.05, conf: 0.95 } };
+    }
+    const one = new SightingSolver(data).solve(data.sightings[3]);
+    if (!one.ok) throw new Error(one.error);
+    expect(one.cam).toMatchObject({ source: 'auto', r: roll });
+    const r = solveProject(data, seeded(1), 0).shots[0];
+    expect(dist(r.gun!, tr.G)).toBeLessThan(3);
   });
 });
 
@@ -200,14 +234,48 @@ describe('project', () => {
     expect(r.gun).toBeUndefined();
   });
 
-  test('a position from the minimap fixes where the user stood, and a copied camera copies it', () => {
+  test('a position from the minimap pulls where the user stood, and a wrong one gets a note', () => {
     const data = sceneProject(tr, { n: 8 });
-    data.sightings[0].position = { x: tr.O[0] / 100, y: tr.O[1] / 100 };
-    for (const s of data.sightings.slice(1)) { s.edges = []; s.headingDeg = undefined; s.sameCameraAsPrevious = true; }
-    const solver = new SightingSolver(data);
-    expect(solver.position(data.sightings[5])).toEqual(data.sightings[0].position as { x: number; y: number });
+    data.shots[0].observer.clip = { auto: { value: { x: tr.O[0] / 100 + 0.05, y: tr.O[1] / 100 }, sigma: 0.05, conf: 0.9 } };
     const r = solveProject(data, seeded(1), 0).shots[0];
-    expect(dist(r.gun!, tr.G)).toBeLessThan(2);
+    expect(dist(r.gun!, tr.G)).toBeLessThan(3);
+    expect(dist({ x: r.observers[0][0], y: r.observers[0][1] }, tr.O)).toBeLessThan(5);
+    expect(r.notes.some((n) => n.includes('minimap'))).toBe(false);
+    data.shots[0].observer.clip = { manual: { x: tr.O[0] / 100 + 1, y: tr.O[1] / 100 } };
+    expect(solveProject(data, seeded(1), 0).shots[0].notes.some((n) => n.includes('minimap'))).toBe(true);
+  });
+
+  test('without a crater, where the user stood gives the crater and the gun', () => {
+    const data = sceneProject(tr, { n: 15 });
+    data.shots[0].crater = {};
+    data.shots[0].observer.clip = { manual: { x: tr.O[0] / 100, y: tr.O[1] / 100 } };
+    const r = solveProject(data, seeded(1), 20).shots[0];
+    expect(r.error).toBeUndefined();
+    expect(dist(r.crater!, [tr.C[0] / 100, tr.C[1] / 100])).toBeLessThan(0.03);
+    expect(r.crater!.sigmaM).toBeGreaterThan(5); // the minimap error of the observer carries over
+    expect(dist(r.gun!, tr.G)).toBeLessThan(3);
+    expect(dist(r.mc[0], tr.G)).toBeLessThan(200);
+  });
+
+  test('the solver picks the weapon that fits clearly better, and the user pick wins', () => {
+    for (const w of ['L52', 'L81'] as const) {
+      const data = sceneProject(makeScene({ weapon: w }), { n: 10 });
+      data.settings.weapon = undefined;
+      const res = solveProject(data, seeded(1), 0);
+      expect(res.weapon.use).toBe(w);
+      expect(res.weapon.field.auto!.conf).toBeGreaterThan(0.5);
+      data.settings.weapon = w === 'L52' ? 'L81' : 'L52';
+      expect(solveProject(data, seeded(1), 0).weapon.use).toBe(data.settings.weapon);
+    }
+  });
+
+  test('two directions that fit equally well make the suspected heading required', () => {
+    // a cost curve over direction (1 deg steps) with minima at 40 and 220 deg
+    const curve = Float64Array.from({ length: 360 }, (_, i) => Math.min((i - 40) ** 2, (i - 220) ** 2 + 5));
+    expect(secondMinimum(curve, 0, 1, true)).toEqual({ th: 220, cost: 5, best: 0 });
+    // exact data has one clear minimum
+    const r = solveProject(sceneProject(tr, { n: 15 }), seeded(1), 0).shots[0];
+    expect(r.ambiguous).toBeUndefined();
   });
 
   test('the result shows where the user stood', () => {
@@ -223,7 +291,7 @@ describe('guns', () => {
     const parts = specs.map((sp, i) => {
       const p = sceneProject(makeScene(sp), { n: 8 });
       for (const x of p.sightings) { x.id += i; x.shotId = `shot${i}`; x.clipId = `clip${i}`; }
-      p.shots[0] = { ...p.shots[0], id: `shot${i}`, name: `Shot ${i + 1}`, impactTimeS: { [`clip${i}`]: p.shots[0].impactTimeS.clip } };
+      p.shots[0] = { ...p.shots[0], id: `shot${i}`, name: `Shot ${i + 1}`, clipId: `clip${i}`, impact: { [`clip${i}`]: p.shots[0].impact.clip } };
       return p;
     });
     return { ...parts[0], shots: parts.flatMap((p) => p.shots), sightings: parts.flatMap((p) => p.sightings) };

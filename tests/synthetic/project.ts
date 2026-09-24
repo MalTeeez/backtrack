@@ -8,6 +8,9 @@ export const DEFAULT_SETTINGS: Settings = {
   bufferS: 40, bitrateMbps: 10, markSigmaPx: 1, compassSigmaDeg: 0.5,
 };
 
+/** An impact interval of one frame at the scene frame rate, whose middle is `t`. */
+const around = (t: number, fps: number) => ({ a: t - 0.5 / fps, b: t + 0.5 / fps });
+
 /** The weapon range presets of the app (WEAPONS in project.svelte.ts, which needs Svelte to import). */
 const RANGES = { L52: [600, 2600], L81: [80, 684] } as const;
 
@@ -39,18 +42,19 @@ export function sceneProject(tr: Truth, o: Options): ProjectData {
     const px = shellPx(tr, t2)!;
     sightings.push({
       id: `s${i}`, shotId: 'shot', clipId: 'clip', timeS: t2, frameW: tr.W, frameH: tr.H,
-      shell: jit(px, nz.shellPx),
+      shell: { manual: jit(px, nz.shellPx) },
       edges: tr.edges.map(([a, b]) => [jit(a, nz.edgePx), jit(b, nz.edgePx)] as [Pt, Pt]),
-      headingDeg: tr.camH + nz.heading(),
+      heading: { manual: tr.camH + nz.heading() }, pitch: {}, roll: {},
       sameCameraAsPrevious: false,
     });
   }
   const weapon = tr.weapon;
   return {
     settings: { ...DEFAULT_SETTINGS, fovDeg: tr.fovDeg, weapon, rangeMinM: RANGES[weapon][0], rangeMaxM: RANGES[weapon][1] },
+    clips: {},
     shots: [{
-      id: 'shot', name: 'Shot 1', crater: { x: C.x, y: C.y },
-      impactTimeS: o.impact === false ? {} : { clip: tr.impactTime + nz.impact },
+      id: 'shot', name: 'Shot 1', crater: { manual: { x: C.x, y: C.y } }, observer: {}, clipId: 'clip',
+      impact: o.impact === false ? {} : { clip: { manual: around(tr.impactTime + nz.impact, tr.fps) } },
     }],
     sightings,
   };

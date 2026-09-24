@@ -9,7 +9,8 @@
   import ResultPhase from './components/phases/ResultPhase.svelte';
   import { missing, openPhases } from './lib/state/missing.ts';
   import { listClips, loadSaved, save } from './lib/state/persistence.ts';
-  import { clipData, clips, fixShot, loadProject, project, ui, type Phase } from './lib/state/project.svelte.ts';
+  import { DATA_VERSION, clipData, clipInfo, clipMap, clips, fixShot, loadProject, project, ui, type Phase } from './lib/state/project.svelte.ts';
+  import MapChooser from './components/MapChooser.svelte';
   import { cycleTheme, theme } from './lib/state/theme.svelte.ts';
 
   const PHASES: [Phase, string][] = [
@@ -48,10 +49,15 @@
 
   let ready = $state(false);
   let loadError = $state('');
+  let loadNote = $state('');
   Promise.all([loadSaved(), listClips()])
     .then(([saved, list]) => {
-      if (saved) loadProject(saved.data, saved.ui);
-      else loadProject($state.snapshot(project));
+      // marks of another version of the data do not load; the clips stay
+      if (saved && saved.version === DATA_VERSION) loadProject(saved.data, saved.ui);
+      else {
+        if (saved) loadNote = 'The saved marks come from an older version of Backtrack and did not load. The clips are still here.';
+        loadProject($state.snapshot(project));
+      }
       clips.list = list;
       if (!list.some((c) => c.id === ui.clipId)) ui.clipId = list[0]?.id ?? null;
       fixShot();
@@ -76,7 +82,7 @@
     const { tool: _, ...rest } = $state.snapshot(ui);
     if (!ready || loadError) return;
     clearTimeout(timer);
-    timer = setTimeout(() => save({ data, ui: rest }).catch(() => {}), 250);
+    timer = setTimeout(() => save({ data, ui: rest, version: DATA_VERSION }).catch(() => {}), 250);
   });
 
   // Enter and Escape leave an input, so the shortcuts work again (plan section 10)
@@ -125,6 +131,14 @@
     </nav>
 
     <div class="flex items-center gap-3">
+      <!-- the map of the selected clip (automation plan section 4) -->
+      {#if ui.clipId && ui.phase !== 'record'}
+        {@const id = ui.clipId}
+        <label class="flex items-center gap-1.5" title="The map of this clip: its image under the maps, and its terrain for the solver" data-testid="clip-map">
+          <span class="label">Map</span>
+          <span class="w-28"><MapChooser value={clipMap(id)} auto={project.clips[id]?.map.auto} onpick={(m) => (clipInfo(id).map.manual = m)} /></span>
+        </label>
+      {/if}
         <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{clips.list.length}</span><span class="label">{clips.list.length == 1 ? "clip" : "clips"}</span></span>
         <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{clipView.sightings.length}</span><span class="label">{clipView.sightings.length == 1 ? "sighting" : "sightings"}</span></span>
         <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{clipView.shots.length}</span><span class="label">{clipView.shots.length == 1 ? "shot" : "shots"}</span></span>
@@ -151,6 +165,7 @@
   </header>
 
   {#if loadError}<p class="note bad shrink-0">{loadError}</p>{/if}
+  {#if loadNote}<p class="note warn shrink-0">{loadNote} <button class="btn sm ml-2" onclick={() => (loadNote = '')}>OK</button></p>{/if}
 
 
   <main class="min-h-0 flex-1 overflow-auto">

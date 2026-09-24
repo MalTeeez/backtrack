@@ -45,6 +45,7 @@
           <dt>Flight time</dt><dd>{r.gun.tof.toFixed(1)} s</dd>
         {/if}
         {#if r.ground}<dt>Gun height</dt><dd>{(r.ground.gun - r.ground.crater).toFixed(0)} m <span class="text-muted">relative to the crater, from the terrain</span></dd>{/if}
+        {#if r.crater}<dt>Crater</dt><dd title="Solved from where you stood and the end of the flight">X {r.crater.x.toFixed(2)}  Y {r.crater.y.toFixed(2)} <span class="text-muted">(+/-{f0(r.crater.sigmaM)} m, solved)</span></dd>{/if}
         <dt>You stood</dt><dd>{#each Object.values(r.fit.shifts) as [dx, dy], i}{i ? ', ' : ''}{f0(Math.hypot(dx, dy))} m from the crater{/each}</dd>
         <dt>Fit error</dt><dd title="How far the rays miss the fitted flight. Near the impact the shell is close, so a few meters are several degrees there.">{r.fit.missM.toFixed(1)} m, {r.fit.rms.toFixed(2)} deg RMS</dd>
         <dt>Sightings</dt><dd>{r.n}</dd>

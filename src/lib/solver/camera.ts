@@ -68,12 +68,23 @@ export function edgeReport(edges: [Pt, Pt][], w: number, h: number, f: number, s
   return { edges: info, pitch, sigma };
 }
 
-/** World ray through camera point c, for a camera at a heading and pitch in degrees, without roll. */
-export function rayWorld(c: Pt, f: number, headingDeg: number, pitchDeg: number): Vec3 {
-  const h = headingDeg * D2R, p = pitchDeg * D2R;
-  const ch = Math.cos(h), sh = Math.sin(h), cp = Math.cos(p), sp = Math.sin(p);
-  const H = [sh, ch, 0], R = [ch, -sh, 0];
-  const F = [cp * H[0], cp * H[1], sp], U = [-sp * H[0], -sp * H[1], cp];
+/**
+ * The camera axes in world coordinates for a heading, a pitch and a roll (deg): right, up and forward. A positive roll
+ * turns the right axis toward up (automation plan Appendix A.1).
+ */
+export function cameraAxes(headingDeg: number, pitchDeg: number, rollDeg = 0): { R: Vec3; U: Vec3; F: Vec3 } {
+  const h = headingDeg * D2R, p = pitchDeg * D2R, r = rollDeg * D2R;
+  const ch = Math.cos(h), sh = Math.sin(h), cp = Math.cos(p), sp = Math.sin(p), cr = Math.cos(r), sr = Math.sin(r);
+  const R0 = [ch, -sh, 0], U0 = [-sp * sh, -sp * ch, cp];
+  const F: Vec3 = [cp * sh, cp * ch, sp];
+  const R: Vec3 = [0, 0, 0], U: Vec3 = [0, 0, 0];
+  for (let i = 0; i < 3; i++) { R[i] = cr * R0[i] + sr * U0[i]; U[i] = -sr * R0[i] + cr * U0[i]; }
+  return { R, U, F };
+}
+
+/** World ray through camera point c, for a camera at a heading, pitch and roll in degrees. */
+export function rayWorld(c: Pt, f: number, headingDeg: number, pitchDeg: number, rollDeg = 0): Vec3 {
+  const { R, U, F } = cameraAxes(headingDeg, pitchDeg, rollDeg);
   const d: Vec3 = [0, 0, 0];
   for (let i = 0; i < 3; i++) d[i] = c.x * R[i] + c.y * U[i] + f * F[i];
   const n = Math.hypot(d[0], d[1], d[2]);
@@ -92,10 +103,8 @@ export function dirTo(O: Vec3, P: Vec3): Vec3 {
 }
 
 /** Projects a world point into the camera, in video pixels. Returns null for a point behind the camera. */
-export function project(P: Vec3, O: Vec3, w: number, h: number, f: number, headingDeg: number, pitchDeg: number): Pt | null {
-  const hh = headingDeg * D2R, p = pitchDeg * D2R;
-  const H = [Math.sin(hh), Math.cos(hh), 0], R = [Math.cos(hh), -Math.sin(hh), 0];
-  const F = [Math.cos(p) * H[0], Math.cos(p) * H[1], Math.sin(p)], U = [-Math.sin(p) * H[0], -Math.sin(p) * H[1], Math.cos(p)];
+export function project(P: Vec3, O: Vec3, w: number, h: number, f: number, headingDeg: number, pitchDeg: number, rollDeg = 0): Pt | null {
+  const { R, U, F } = cameraAxes(headingDeg, pitchDeg, rollDeg);
   const v = [P[0] - O[0], P[1] - O[1], P[2] - O[2]];
   const dot = (a: number[]) => a[0] * v[0] + a[1] * v[1] + a[2] * v[2];
   const z = dot(F);

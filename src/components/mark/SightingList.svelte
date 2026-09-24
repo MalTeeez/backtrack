@@ -12,8 +12,10 @@
   /** The sightings of the current shot: their values as fields, and notes only for what is missing or wrong. */
   import { ChevronDown, ChevronRight, Trash2 } from '@lucide/svelte';
   import NumInput from '../NumInput.svelte';
+  import AutoNum from '../AutoNum.svelte';
+  import FieldTag from '../FieldTag.svelte';
   import UseToggle from '../UseToggle.svelte';
-  import CraterMap from '../CraterMap.svelte';
+  import { impactTime, value } from '../../lib/solver/field.ts';
   import { timecode } from './Timeline.svelte';
   import { SightingSolver } from '../../lib/solver/sightings.ts';
   import { motionFlags, motionWarning, shellSpeeds } from '../../lib/solver/motion.ts';
@@ -37,11 +39,12 @@
   const jumps = $derived(motionFlags($state.snapshot(project), solver));
   const jumpsOf = (id: Id) => jumps.filter((f) => f.to === id).map(motionWarning);
   const speeds = $derived(shellSpeeds($state.snapshot(project), solver));
-  // the sightings whose position map is open
-  const round = (v: number | undefined) => (v == null ? undefined : Math.round(v * 100) / 100);
   // the user enters the crater in phase 3, so its absence is no problem here
   const needsCoords = forLater;
-  const CAMERA = { 'compass and edges': 'From the compass heading and the edges', copied: 'Copied from an earlier sighting in this clip' };
+  const CAMERA = {
+    edges: 'The pitch from the marked edges', auto: 'The pitch found by Backtrack', typed: 'The pitch you typed',
+    copied: 'Copied from an earlier sighting in this clip',
+  };
   const deg = (v: number) => `${v.toFixed(2)} deg`;
 </script>
 
@@ -57,7 +60,9 @@
     {@const todo = lacks(s)}
     {@const jump = jumpsOf(s.id)}
     {@const bad = (!r.ok && !needsCoords(r.error) && !todo.length) || r.warnings.length > 0 || jump.length > 0}
-    {@const tau = shot.impactTimeS[s.clipId] != null ? shot.impactTimeS[s.clipId] - s.timeS : null}
+    {@const I = value(shot.impact[s.clipId])}
+    {@const tau = I ? impactTime(I) - s.timeS : null}
+    {@const shell = value(s.shell)}
     {@const selected = ui.sightingId === s.id}
     <div
       class="min-w-0 border p-2.5 text-[12.5px] [overflow-wrap:anywhere] {selected ? 'border-[var(--accent-border-active)] bg-[var(--accent-soft)]' : 'border-line'} {s.excluded ? 'opacity-60' : ''}"
@@ -87,32 +92,27 @@
         <dt>Time</dt>
         <dd><button class="num text-accent underline decoration-dotted underline-offset-2 hover:text-text" onclick={() => ongo(s.clipId, s.timeS, s.id)} title="Go to this frame">{timecode(s.timeS)}</button></dd>
         <dt>Before impact</dt><dd class="num">{tau != null ? `${tau.toFixed(3)} s` : '-'}</dd>
-        <dt>Shell</dt><dd class="num">{s.shell ? `${s.shell.x.toFixed(1)}, ${s.shell.y.toFixed(1)}` : '-'}</dd>
+        <dt>Shell</dt><dd class="num flex flex-wrap items-center gap-x-2">{shell ? `${shell.x.toFixed(1)}, ${shell.y.toFixed(1)}` : '-'}{#if s.shell.auto}<FieldTag kind="shell" field={s.shell} onreset={() => (s.shell.manual = undefined)} fmt={(p) => { const q = p as { x: number; y: number }; return `${q.x.toFixed(1)}, ${q.y.toFixed(1)}`; }} />{/if}</dd>
         <dt>Edges</dt><dd class="num">{s.edges.length}</dd>
         <dt>Azimuth</dt><dd class="num">{a.ok ? deg(a.az) : '-'}</dd>
         <dt>Elevation</dt><dd class="num">{a.ok ? deg(a.el) : '-'}</dd>
         <dt>Shell speed</dt><dd class="num" title="How fast the shell moves as seen by the camera, since the sighting before this one">{speeds.has(s.id) ? `${speeds.get(s.id)!.toFixed(2)} deg/s` : '-'}</dd>
         {#if a.ok}
-          <dt>Camera</dt><dd class="num" title={CAMERA[a.cam.source]}>heading {deg(a.cam.h)}, pitch {deg(a.cam.p)}{a.cam.source === 'copied' ? ' (copied)' : ''}</dd>
+          <dt>Camera</dt><dd class="num" title={CAMERA[a.cam.source]}>heading {deg(a.cam.h)}, pitch {deg(a.cam.p)}{a.cam.r ? `, roll ${deg(a.cam.r)}` : ''}{a.cam.source === 'copied' ? ' (copied)' : a.cam.source === 'edges' ? ' (edges)' : ''}</dd>
         {/if}
       </dl>
       {#if !s.sameCameraAsPrevious}
-        <div class="mt-1.5 grid grid-cols-[minmax(0,1fr)_5.5rem] gap-1.5">
-          <span title="The compass heading of the game at this frame. A new sighting fills it from the compass in the frame.">
-            <NumInput label="Compass heading" unit="deg" step={0.5} bind:value={s.headingDeg} />
+        <div class="mt-1.5 grid grid-cols-[minmax(0,1fr)_5.5rem] items-start gap-1.5">
+          <span title="The compass heading of the game at this frame. A new sighting reads it from the compass in the frame.">
+            <AutoNum label="Compass heading" unit="deg" kind="heading" step={0.5} bind:field={s.heading} />
           </span>
           <span title="The zoom of binoculars or a scope on this frame. The field of view is the game FOV divided by it."><NumInput label="Zoom" unit="x" step={0.5} min={1} bind:value={() => s.zoom ?? 1, (v) => (s.zoom = v && v > 0 && v !== 1 ? v : undefined)} /></span>
         </div>
-      {/if}
-      {@const copied = !s.position && s.sameCameraAsPrevious ? solver.position(s) : null}
-      <div class="mt-1.5 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-1.5" title="Where you stood on this frame, from the minimap. Optional: without it, the solver estimates the spot near the crater.">
-        <NumInput label="Your X (optional)" step={0.01} placeholder={copied ? String(copied.x) : 'minimap'} bind:value={() => s.position?.x, (v) => (s.position = { ...s.position, x: round(v) })} />
-        <NumInput label="Your Y (optional)" step={0.01} placeholder={copied ? String(copied.y) : 'minimap'} bind:value={() => s.position?.y, (v) => (s.position = { ...s.position, y: round(v) })} />
-        <button class="option h-[30px] justify-center px-2 text-[11px]" aria-pressed={!!ui.mapOpen[s.id]} onclick={() => (ui.mapOpen[s.id] = !ui.mapOpen[s.id])} title="Pick where you stood on the map">Map</button>
-      </div>
-      {#if ui.mapOpen[s.id]}
-        <div class="mt-1.5">
-          <CraterMap viewId={s.id} shot={shot} reachM={project.settings.rangeMaxM} map={project.settings.map} observer={s.position ?? copied} onpick={(q) => (s.position = q)} />
+        <div class="mt-1.5 grid grid-cols-2 items-start gap-1.5">
+          <span title={s.edges.length && s.pitch.manual == null ? 'The marked edges give the pitch. Type a pitch to use it instead.' : 'The pitch of the camera, up positive. Marked edges give it too.'}>
+            <AutoNum label={s.edges.length && s.pitch.manual == null ? 'Pitch (edges win)' : 'Pitch'} unit="deg" kind="pitch" step={0.1} bind:field={s.pitch} required={s.edges.length ? 'from edges' : 'required'} />
+          </span>
+          <span title="The roll of the camera. Without a value the camera is level."><AutoNum label="Roll" unit="deg" kind="roll" step={0.1} bind:field={s.roll} required="level" /></span>
         </div>
       {/if}
       <label class="mt-2 flex items-start gap-1.5 text-copy" title="Use the camera of the previous sighting in this clip, when the view did not move">

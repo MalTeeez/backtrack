@@ -1,5 +1,6 @@
 /** Draws the marks of a sighting on a canvas, and finds the mark under the pointer. */
 import { edgeReport, focalPx } from '../../lib/solver/camera.ts';
+import { fieldState, value, type FieldState } from '../../lib/solver/field.ts';
 import type { Aim, SightingResult } from '../../lib/solver/sightings.ts';
 import type { Pt, Settings, Sighting } from '../../lib/solver/types.ts';
 
@@ -36,8 +37,13 @@ export function compassRose(g: CanvasRenderingContext2D, x: number, y: number, r
   g.restore();
 }
 
-/** Marks over the video ignore the page theme. They use bright colors that show on game footage. */
+/**
+ * Marks over the video ignore the page theme. They use bright colors that show on game footage. The shell mark has a
+ * color per state of its field (automation plan section 2.3): the user's, automatic, or the user's where it differs
+ * from a confident automatic one. An automatic mark too unsure to count shows dashed.
+ */
 const MARK = { shell: '#e1b06e', edge: '#6a9fcc', grab: '#ffffff' };
+export const SHELL_COLORS: Record<FieldState, string> = { manual: MARK.shell, auto: '#5fd4c4', required: '#5fd4c4', warned: '#ff6b6b' };
 
 /** A mark the user can drag: the shell, or one end of an edge. */
 export type Handle = { kind: 'shell' } | { kind: 'edge'; i: number; j: 0 | 1 };
@@ -54,7 +60,8 @@ export function hitMark(s: Sighting | undefined, p: Pt, tol: number): Handle | n
     if (d <= bd) { bd = d; best = h; }
   };
   s.edges.forEach(([a, b], i) => { test(a, { kind: 'edge', i, j: 0 }); test(b, { kind: 'edge', i, j: 1 }); });
-  if (s.shell) test(s.shell, { kind: 'shell' });
+  const shell = value(s.shell);
+  if (shell) test(shell, { kind: 'shell' });
   return best;
 }
 
@@ -71,9 +78,12 @@ export function drawMarks(g: CanvasRenderingContext2D, s: Sighting | undefined, 
         g.beginPath(); g.arc(p.x, p.y, 3 * lw, 0, 7); g.stroke();
       });
     });
-    if (s.shell) {
-      const p = T(s.shell), r = 8 * lw;
-      g.strokeStyle = same(active, { kind: 'shell' }) ? MARK.grab : MARK.shell;
+    const state = fieldState('shell', s.shell);
+    const shell = value(s.shell) ?? s.shell.auto?.value;
+    if (shell) {
+      const p = T(shell), r = 8 * lw;
+      g.strokeStyle = same(active, { kind: 'shell' }) ? MARK.grab : SHELL_COLORS[state];
+      g.setLineDash(state === 'required' ? [3 * lw, 3 * lw] : []);
       g.beginPath(); g.arc(p.x, p.y, r, 0, 7);
       // a crosshair with a gap, so the shell itself stays visible
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -81,6 +91,7 @@ export function drawMarks(g: CanvasRenderingContext2D, s: Sighting | undefined, 
         g.lineTo(p.x + dx * 2.2 * r, p.y + dy * 2.2 * r);
       }
       g.stroke();
+      g.setLineDash([]);
     }
   }
   if (pending) {
@@ -123,7 +134,7 @@ export function markNotes(
 ): Note[] {
   const out: Note[] = [];
   const noCamera = s && !s.sameCameraAsPrevious
-    ? [...(s.edges.length ? [] : ['No vertical edge yet.']), ...(s.headingDeg == null ? ['No compass heading yet.'] : [])]
+    ? [...(s.edges.length || value(s.pitch) != null ? [] : ['No vertical edge yet.']), ...(value(s.heading) == null ? ['No compass heading yet.'] : [])]
     : [];
   const W = s?.frameW ?? size.w, H = s?.frameH ?? size.h;
   if (!W || !H) return out;
@@ -131,7 +142,7 @@ export function markNotes(
   const rep = edgeReport(s?.edges ?? [], W, H, f, st.markSigmaPx);
   const edges = (s?.edges ?? []).map(([a, b], i) => ({ a, b, ...rep.edges[i] }));
   edges.forEach((e, i) => {
-    const warn: string[] = !s?.shell && i === 0 ? [...noCamera] : [];
+    const warn: string[] = !value(s?.shell) && i === 0 ? [...noCamera] : [];
     if (e.pitch == null) warn.push('Gives no pitch. Mark it again.');
     else if (e.offBy != null) warn.push(`${Math.abs(e.offBy).toFixed(1)} deg off the other edges, left out. Is it vertical?`);
     out.push({
@@ -145,20 +156,27 @@ export function markNotes(
     });
   });
   if (pending) out.push({ kind: 'edge', target: { kind: 'pending' }, at: pending, title: `Edge ${edges.length + 1}`, short: 'click the other end', lines: [fmtPt(pending), 'Click the other end.'], warn: [] });
-  if (s?.shell) {
+  const shell = value(s?.shell);
+  if (s && shell) {
+    const state = fieldState('shell', s.shell);
+    const auto = s.shell.auto;
     out.push({
       kind: 'shell',
       target: { kind: 'shell' },
-      at: s.shell,
-      title: 'Shell',
-      short: [aim?.ok ? `el ${aim.el.toFixed(2)} deg` : fmtPt(s.shell), ...(speed != null ? [`${speed.toFixed(2)} deg/s`] : [])].join(', '),
+      at: shell,
+      title: state === 'auto' ? `Shell (auto ${Math.round(auto!.conf * 100)}%)` : 'Shell',
+      short: [aim?.ok ? `el ${aim.el.toFixed(2)} deg` : fmtPt(shell), ...(speed != null ? [`${speed.toFixed(2)} deg/s`] : [])].join(', '),
       lines: [
-        fmtPt(s.shell),
+        fmtPt(shell),
+        ...(state !== 'auto' && auto?.value ? [`Automatic mark ${fmtPt(auto.value)}`] : []),
         ...(aim?.ok ? [`Azimuth ${aim.az.toFixed(2)} deg, elevation ${aim.el.toFixed(2)} deg`] : []),
         ...(speed != null ? [`Moves ${speed.toFixed(2)} deg/s since the sighting before`] : []),
       ],
       // the crater comes in Coordinates, so its absence is no problem while marking
-      warn: noCamera.length ? noCamera : r && !r.ok && !forLater(r.error) ? [r.error] : [],
+      warn: [
+        ...(noCamera.length ? noCamera : r && !r.ok && !forLater(r.error) ? [r.error] : []),
+        ...(state === 'warned' ? ['Differs from the automatic mark.'] : []),
+      ],
     });
   }
   return out;

@@ -96,6 +96,8 @@ test('synthetic shot: 15 sightings with edges and compass find the gun within 10
   await expect.poll(() => clipLength(page)).toBeGreaterThan(1);
   const duration = await clipLength(page);
   await expect(page.getByTestId('phase-result')).toBeDisabled();
+  // the synthetic scene has no map: close the question for it
+  await page.getByRole('button', { name: 'Not now' }).click();
 
   // scan back from the end for the impact flash, then step to its first frame
   let t = duration - 0.1;

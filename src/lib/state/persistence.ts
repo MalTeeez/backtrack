@@ -4,7 +4,8 @@ import type { Clip, ClipMeta, Id, ProjectData } from '../solver/types.ts';
 import type { Ui } from './project.svelte.ts';
 import { prepareClip } from '../video/prepareClip.ts';
 
-interface Saved { data: ProjectData; ui: Partial<Ui> }
+/** The project, its UI state, and the version of its data (DATA_VERSION in project.svelte.ts). */
+interface Saved { data: ProjectData; ui: Partial<Ui>; version?: number }
 
 interface Schema extends DBSchema {
   clips: { key: Id; value: Clip };

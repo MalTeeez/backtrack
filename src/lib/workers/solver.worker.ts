@@ -3,9 +3,10 @@
  * rejects flights that run into the ground, and the result gets the slopes around the possible guns. The safe zones
  * of the gun follow in a second message, because they take longer.
  */
-import { BALLISTICS } from '../solver/ballistics.ts';
+import { BALLISTICS, WEAPONS } from '../solver/ballistics.ts';
 import { solveProject } from '../solver/result.ts';
-import { craterGame } from '../solver/sightings.ts';
+import { anchorGame } from '../solver/sightings.ts';
+import { value } from '../solver/field.ts';
 import type { GroundAt, MapId, ProjectData } from '../solver/types.ts';
 import { reach, slopeAt, slopeGrid, STEEP_DEG } from '../terrain/analysis.ts';
 import { terrainHeights } from '../terrain/heights.ts';
@@ -26,8 +27,10 @@ let safeKey = '', safeGrid: ReturnType<typeof reach> = null;
 
 self.onmessage = async ({ data }: MessageEvent<{ token: number; project: ProjectData }>) => {
   try {
-    const p = data.project, map = p.settings.map, rmax = p.settings.rangeMaxM;
-    let heights, ground: string | undefined = 'The result assumes flat ground. Pick the map in Coordinates to use terrain heights.';
+    // ponytail: one map per solve; the app solves the shots of one clip at a time
+    const p = data.project, map = p.shots.map((s) => s.clipId && value(p.clips[s.clipId]?.map)).find(Boolean) || undefined;
+    const rmax = Math.max(p.settings.rangeMaxM, ...Object.values(WEAPONS).map((w) => w.max));
+    let heights, ground: string | undefined = 'The result assumes flat ground. Pick the map of the clip to use terrain heights.';
     let t: Terrain | null = null, at: GroundAt | undefined;
     if (map) {
       t = await terrainOf(map);
@@ -35,7 +38,7 @@ self.onmessage = async ({ data }: MessageEvent<{ token: number; project: Project
         // everything the gun of each crater can reach, so the flights can be checked against the ground
         const margin = (rmax + 400) / 100;
         for (const s of p.shots) {
-          const c = craterGame(s);
+          const c = anchorGame(s);
           if (c) await t.preload(c.x - margin, c.y - margin, c.x + margin, c.y + margin);
         }
         const tt = t;
@@ -67,11 +70,11 @@ self.onmessage = async ({ data }: MessageEvent<{ token: number; project: Project
     // where the guns can hit: every gun the shots point to
     const guns = result.guns.map((g) => ({ x: g.x, y: g.y }));
     if (!t || !at || !heights || !guns.length) return;
-    const key = `${map}:${p.settings.weapon}:${rmax}:${guns.map((g) => `${Math.round(g.x / 5)},${Math.round(g.y / 5)}`).join(';')}`;
+    const key = `${map}:${result.weapon.use}:${rmax}:${guns.map((g) => `${Math.round(g.x / 5)},${Math.round(g.y / 5)}`).join(';')}`;
     if (key !== safeKey) {
       const m = (rmax + 200) / 100;
       for (const g of guns) await t.preload(g.x / 100 - m, g.y / 100 - m, g.x / 100 + m, g.y / 100 + m);
-      safeGrid = reach(at, BALLISTICS[p.settings.weapon], guns, rmax);
+      safeGrid = reach(at, BALLISTICS[result.weapon.use], guns, p.settings.weapon ? p.settings.rangeMaxM : WEAPONS[result.weapon.use].max);
       safeKey = key;
     }
     if (safeGrid) postMessage({ token: data.token, safe: { grid: safeGrid, guns } });

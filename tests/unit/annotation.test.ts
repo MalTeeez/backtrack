@@ -7,13 +7,17 @@ import { makeScene } from '../synthetic/scene.ts';
 const tr = makeScene();
 const clip: ClipMeta = { id: 'clip', name: 'Clip 1 (17 s)', source: 'buffer', durationS: tr.duration, width: tr.W, height: tr.H, createdAt: 0 };
 let n = 0;
-const make = { uid: () => `new${n++}`, shot: (k: number): Shot => ({ id: `shot${k}`, name: `Shot ${k}`, crater: {}, impactTimeS: {} }) };
-const empty = (): ProjectData => ({ settings: { ...sceneProject(tr, { n: 1 }).settings, fovDeg: 70 }, shots: [make.shot(1)], sightings: [] });
+const make = { uid: () => `new${n++}`, shot: (k: number): Shot => ({ id: `shot${k}`, name: `Shot ${k}`, crater: {}, impact: {}, observer: {} }) };
+const empty = (): ProjectData => ({ settings: { ...sceneProject(tr, { n: 1 }).settings, fovDeg: 70 }, clips: {}, shots: [make.shot(1)], sightings: [] });
 
 describe('annotation files', () => {
   test('a clip exports and imports back into an empty project unchanged', () => {
     const src = sceneProject(tr, { n: 5 });
     src.sightings[1].excluded = true;
+    // automatic values travel with their sigma and confidence
+    src.sightings[2].shell.auto = { value: { x: 1, y: 2 }, sigma: 0.5, conf: 0.9 };
+    src.shots[0].observer.clip = { auto: { value: { x: 3, y: 4 }, sigma: 0.05, conf: 0.8 } };
+    src.clips.clip = { map: { auto: { value: 'ozeti', conf: 0.9 } } };
     const a = annotation(src, clip)!;
     const dst = empty();
     const notes = applyAnnotation(dst, 'imported', a, make, clip);
@@ -22,7 +26,9 @@ describe('annotation files', () => {
     expect(dst.settings.fovDeg).toBe(src.settings.fovDeg);
     expect(dst.shots).toHaveLength(1);
     expect(dst.shots[0].crater).toEqual(src.shots[0].crater);
-    expect(dst.shots[0].impactTimeS.imported).toBe(src.shots[0].impactTimeS.clip);
+    expect(dst.shots[0].impact.imported).toEqual(src.shots[0].impact.clip);
+    expect(dst.shots[0].observer.imported).toEqual(src.shots[0].observer.clip);
+    expect(dst.clips.imported).toEqual(src.clips.clip);
     const strip = ({ id: _i, clipId: _c, shotId: _s, ...s }: ProjectData['sightings'][number]) => s;
     expect(dst.sightings.map(strip)).toEqual(src.sightings.map(strip));
   });
@@ -49,12 +55,12 @@ describe('annotation files', () => {
 
   test('a shot of the same name in another clip stays a separate shot of that clip', () => {
     const one = sceneProject(tr, { n: 2 }), two = sceneProject(tr, { n: 3 });
-    two.shots[0].crater = { x: 10, y: 20 };
+    two.shots[0].crater = { manual: { x: 10, y: 20 } };
     const dst = empty();
     applyAnnotation(dst, 'a', annotation(one, clip)!, make, clip);
     applyAnnotation(dst, 'b', annotation(two, { ...clip, name: 'Clip 2' })!, make, clip);
     expect(dst.shots.map((s) => [s.name, s.clipId])).toEqual([['Shot 1', 'a'], ['Shot 1', 'b']]);
-    expect(dst.shots[1].crater).toEqual({ x: 10, y: 20 });
+    expect(dst.shots[1].crater).toEqual({ manual: { x: 10, y: 20 } });
     expect(dst.sightings.filter((s) => s.shotId === dst.shots[1].id).every((s) => s.clipId === 'b')).toBe(true);
     // even with the same crater, another clip gets its own shot
     applyAnnotation(dst, 'c', annotation(one, clip)!, make, clip);
@@ -63,19 +69,19 @@ describe('annotation files', () => {
 
   test('two shots of one name in a clip keep their own sightings through a file', () => {
     const src = sceneProject(tr, { n: 4 });
-    src.shots.push({ ...make.shot(2), name: src.shots[0].name, impactTimeS: { clip: 1 } });
+    src.shots.push({ ...make.shot(2), name: src.shots[0].name, clipId: 'clip', impact: { clip: { manual: { a: 0.9, b: 1 } } } });
     src.sightings.slice(2).forEach((s) => (s.shotId = src.shots[1].id));
     const dst = empty();
     applyAnnotation(dst, 'x', annotation(src, clip)!, make, clip);
     expect(dst.shots.map((s) => [s.name, dst.sightings.filter((x) => x.shotId === s.id).length])).toEqual([['Shot 1', 2], ['Shot 1 (2)', 2]]);
   });
 
-  test('an old file brings the default range of its weapon', () => {
-    const a = annotation(sceneProject(tr, { n: 2 }), clip)!;
-    a.settings = { fovDeg: 90, fovAxis: 'h', weapon: 'L81' };
+  test('a file with the weapon left to the solver leaves it to the solver', () => {
+    const src = sceneProject(tr, { n: 2 });
+    src.settings.weapon = undefined;
     const dst = empty();
-    applyAnnotation(dst, 'x', a, make, clip);
-    expect([dst.settings.weapon, dst.settings.rangeMinM, dst.settings.rangeMaxM]).toEqual(['L81', 80, 684]);
+    applyAnnotation(dst, 'x', annotation(src, clip)!, make, clip);
+    expect(dst.settings.weapon).toBeUndefined();
   });
 
   test('a second import of the same file adds nothing, and a left out shot stays left out', () => {
@@ -105,11 +111,11 @@ describe('annotation files', () => {
   test('a shot spread over two clips splits into one shot per clip', () => {
     const p = sceneProject(tr, { n: 4 });
     p.sightings.slice(2).forEach((s) => (s.clipId = 'other'));
-    p.shots[0].impactTimeS.other = 12;
+    p.shots[0].impact.other = { manual: { a: 11.9, b: 12 } };
     expect(oneClipPerShot(p, make)).toEqual(['Shot 1 (2)']);
     const [a, b] = p.shots;
-    expect(Object.keys(a.impactTimeS)).toEqual(['clip']);
-    expect(b.impactTimeS).toEqual({ other: 12 });
+    expect(Object.keys(a.impact)).toEqual(['clip']);
+    expect(b.impact).toEqual({ other: { manual: { a: 11.9, b: 12 } } });
     expect(b.crater).toEqual({});
     expect(p.sightings.map((s) => [s.clipId, s.shotId === a.id ? 'a' : 'b'])).toEqual([['clip', 'a'], ['clip', 'a'], ['other', 'b'], ['other', 'b']]);
     // a project without mixed shots stays as it is
@@ -117,10 +123,10 @@ describe('annotation files', () => {
     expect(p.shots).toHaveLength(2);
     expect(p.shots.map((s) => s.clipId)).toEqual(['clip', 'other']);
     // a shot of an old project that a deleted clip left behind goes; a new blank shot and a shot of a clip stay
-    b.crater = { x: 1, y: 2 };
+    b.crater = { manual: { x: 1, y: 2 } };
     p.sightings = p.sightings.filter((s) => s.clipId !== 'other');
-    delete b.impactTimeS.other;
-    p.shots.push({ ...make.shot(8), crater: { x: 3, y: 4 } }, make.shot(9));
+    delete b.impact.other;
+    p.shots.push({ ...make.shot(8), crater: { manual: { x: 3, y: 4 } } }, make.shot(9));
     oneClipPerShot(p, make);
     expect(p.shots.map((s) => s.name)).toEqual(['Shot 1', 'Shot 1 (2)', 'Shot 9']);
   });

@@ -2,7 +2,7 @@
  * Ground heights for a project from terrain data (docs/terrain-plan.md). The craters sample the terrain directly. The gun height depends on the gun position, which the solve finds: the loop solves with a gun height,
  * samples the terrain at the gun, and solves again, until the height changes by less than 0.5 m (at most 4 rounds).
  */
-import { GAME_UNIT_M, craterGame } from '../solver/sightings.ts';
+import { GAME_UNIT_M, anchorGame } from '../solver/sightings.ts';
 import type { ProjectResult } from '../solver/result.ts';
 import type { Heights, ProjectData } from '../solver/types.ts';
 
@@ -13,7 +13,7 @@ export type Ground = (x: number, y: number) => Promise<number | null>;
 export async function terrainHeights(ground: Ground, data: ProjectData, solve: (h: Heights) => ProjectResult): Promise<Heights | null> {
   const h: Heights = { crater: {}, gun: {} };
   for (const shot of data.shots) {
-    const c = craterGame(shot);
+    const c = anchorGame(shot);
     if (!c) continue;
     const z = await ground(c.x, c.y);
     if (z == null) return null;

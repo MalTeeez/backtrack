@@ -13,7 +13,9 @@
   import { shellSpeeds } from '../../lib/solver/motion.ts';
   import { readVideoCompass, readVideoCompassRaw } from '../../lib/video/compassRead.ts';
   import { MIN_CORR, MIN_MARGIN } from '../../lib/video/compass.ts';
-  import { addShot, clips, clipView, currentShot, fixShot, project, sameFrame, shotsOf, sightingAt, uid, ui } from '../../lib/state/project.svelte.ts';
+  import { addShot, clipInfo, clipMap, clips, clipView, currentShot, fixShot, newSighting, project, sameFrame, shotsOf, sightingAt, ui } from '../../lib/state/project.svelte.ts';
+  import { detected, value } from '../../lib/solver/field.ts';
+  import MapChooser from '../MapChooser.svelte';
   import { clipFrames, clipUrl } from '../../lib/state/persistence.ts';
   import { frameIndexAt, frameTimeAt, seekTimeFor } from '../../lib/video/frames.ts';
   import type { Id, Pt, Sighting } from '../../lib/solver/types.ts';
@@ -66,7 +68,7 @@
     return x.shotId === shot.id ? n : `${project.shots.find((y) => y.id === x.shotId)?.name ?? 'Other shot'}, ${n.toLowerCase()}`;
   }
   // any shot lands on this frame
-  const impactHere = $derived(!!loaded && project.shots.some((s) => s.impactTimeS[loaded!] != null && sameFrame(s.impactTimeS[loaded!], frameTime)));
+  const impactHere = $derived(!!loaded && project.shots.some((s) => { const i = value(s.impact[loaded!]); return !!i && sameFrame(i.b, frameTime); }));
 
   // the labels next to the marks of this frame: those of the shot, and those of the other shots with their name
   const notes = $derived.by(() => {
@@ -80,7 +82,7 @@
     const name = (id: Id) => project.shots.find((x) => x.id === id)?.name ?? 'Other shot';
     // the copied edges: labels without a remove button, which say where they come from
     const copiedNotes = source
-      ? markNotes({ ...$state.snapshot(source), shell: undefined }, null, size, project.settings, null, null).map((n) => ({
+      ? markNotes({ ...$state.snapshot(source), shell: {} }, null, size, project.settings, null, null).map((n) => ({
           ...n, fixed: true, from: { short: 'from prev', long: `Copied with the camera of ${sightingName(source)} at ${source.timeS.toFixed(3)} s` },
         }))
       : [];
@@ -211,7 +213,7 @@
    */
   const marks = $derived(
     loaded ? [...project.sightings.filter((s) => s.shotId === shot.id && s.clipId === loaded).map((s) => ({ t: s.timeS, id: s.id as Id | undefined })),
-      ...(shot.impactTimeS[loaded] != null ? [{ t: shot.impactTimeS[loaded], id: undefined }] : [])].sort((a, b) => a.t - b.t) : [],
+      ...(value(shot.impact[loaded]) ? [{ t: value(shot.impact[loaded])!.b, id: undefined }] : [])].sort((a, b) => a.t - b.t) : [],
   );
   function jump(dir: -1 | 1) {
     if (!loaded) return;
@@ -225,16 +227,12 @@
     if (!loaded || shot.clipId !== loaded) return null;
     const found = sightingAt(loaded, frameTime);
     if (found) return found;
-    project.sightings.push({
-      id: uid(), shotId: shot.id, clipId: loaded, timeS: frameTime,
-      frameW: video.videoWidth, frameH: video.videoHeight,
-      edges: [], sameCameraAsPrevious: false,
-    });
+    project.sightings.push(newSighting({ shotId: shot.id, clipId: loaded, timeS: frameTime, frameW: video.videoWidth, frameH: video.videoHeight }));
     const s = project.sightings.at(-1)!; // the reactive copy
     ui.sightingId = s.id;
-    // the heading from the compass in the frame, once; after that it is the user's to change
+    // the heading from the compass in the frame: the display shows whole degrees, so it is uniform over one degree
     const h = compassNow();
-    if (h != null) s.headingDeg = h;
+    s.heading.auto = h != null ? detected('heading', h, 1 / Math.sqrt(12)) : { conf: 0, reason: 'the compass reader is not sure of this frame' };
     return s;
   }
 
@@ -283,14 +281,14 @@
     if (ui.tool === 'edge' && !pending) { pending = p; return; }
     const s = here();
     if (!s) return;
-    if (ui.tool === 'shell') s.shell = p;
+    if (ui.tool === 'shell') s.shell.manual = p;
     else { s.edges.push([pending!, p]); pending = null; }
   }
 
   /** Moves a mark that the user drags in the video or the magnifier. */
   function drag(h: Handle, raw: Pt) {
     if (!sighting || playing) return;
-    if (h.kind === 'shell') sighting.shell = round(raw);
+    if (h.kind === 'shell') sighting.shell.manual = round(raw);
     else sighting.edges[h.i][h.j] = round(raw);
   }
 
@@ -298,19 +296,25 @@
   function removeMark(t: MarkTarget) {
     if (t.kind === 'pending') pending = null;
     else if (!sighting) return;
-    else if (t.kind === 'shell') sighting.shell = undefined;
+    // the user's mark goes first, then the automatic one
+    else if (t.kind === 'shell') { if (sighting.shell.manual) sighting.shell.manual = undefined; else sighting.shell.auto = undefined; }
     else sighting.edges.splice(t.i, 1);
   }
 
+  /**
+   * The user marks the first frame that shows the impact. The impact happened between the frame before it and this
+   * one, and the solver takes the middle (automation plan section 9).
+   */
   function markImpact() {
     if (!loaded || shot.clipId !== loaded) return;
-    const t = shot.impactTimeS[loaded];
-    if (t != null && sameFrame(t, frameTime)) delete shot.impactTimeS[loaded];
-    else shot.impactTimeS[loaded] = frameTime;
+    shot.impact[loaded] ??= {};
+    const f = shot.impact[loaded]; // the reactive copy
+    if (f.manual && sameFrame(f.manual.b, frameTime)) f.manual = undefined;
+    else f.manual = { a: frames?.length ? frames[Math.max(0, frameIndexAt(frames, frameTime) - 1)] : frameTime - 1 / 60, b: frameTime };
   }
   function clearMarks() {
     if (!sighting) return;
-    sighting.shell = undefined;
+    sighting.shell = {};
     sighting.edges = [];
     pending = null;
   }
@@ -378,7 +382,13 @@
           {#if loadError}
             <p class="note bad m-3">{loadError}</p>
           {:else if loaded}
-            <Viewer {video} {frame} {sighting} {others} copied={source?.edges ?? []} impact={impactHere} {pending} {lock} {notes} tool={!!ui.tool} onpoint={place} onhover={(p) => (hover = p)} ondrag={drag} onmiddle={(p) => (lock = lock ? null : p)} onremove={removeMark} />
+            <div class="relative h-full">
+              <Viewer {video} {frame} {sighting} {others} copied={source?.edges ?? []} impact={impactHere} {pending} {lock} {notes} tool={!!ui.tool} onpoint={place} onhover={(p) => (hover = p)} ondrag={drag} onmiddle={(p) => (lock = lock ? null : p)} onremove={removeMark} />
+              <!-- the map, asked when marking of a clip starts (automation plan section 4) -->
+              {#if !clipMap(loaded) && !ui.mapAsked[loaded]}
+                <MapChooser big value={undefined} auto={project.clips[loaded]?.map.auto} onpick={(m) => (clipInfo(loaded!).map.manual = m)} onskip={() => (ui.mapAsked[loaded!] = true)} />
+              {/if}
+            </div>
           {:else}
             <p class="m-0 flex items-center justify-center gap-2 p-8 text-muted"><Spinner /> Loading the clip...</p>
           {/if}

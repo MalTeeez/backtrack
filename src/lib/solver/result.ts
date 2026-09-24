@@ -2,14 +2,16 @@
  * Turns the whole project into a result for each shot, with its accuracy, and the guns the shots point to (phase 4).
  * Shots that agree on a gun combine; shots that do not come from another gun.
  */
-import { angleDiff, wrap360 } from './camera.ts';
+import { D2R, angleDiff, wrap360 } from './camera.ts';
 import { MC_RUNS, makeJitter, percentile, type Rng } from './montecarlo.ts';
-import { SOURCE_TOL_DEG, SightingSolver, craterXyz } from './sightings.ts';
-import { BALLISTICS } from './ballistics.ts';
-import { motionFlags, motionShotWarning } from './motion.ts';
+import { GAME_UNIT_M, SOURCE_TOL_DEG, SightingSolver, anchorGame, craterGame, toMeters } from './sightings.ts';
+import { BALLISTICS, WEAPONS } from './ballistics.ts';
+import { costFloor } from './ballisticFit.ts';
+import { confRatio, sigmaOf, value } from './field.ts';
+import { motionFlags, motionShotWarning, shellSpeeds } from './motion.ts';
 import { solveShot } from './solve.ts';
 import { intersectTracks, minCrossingAngle } from './tracks.ts';
-import type { Fit, Grid, GroundAt, Gun, Heights, Id, ProjectData, Ray, Shot, SolveOptions, Vec3 } from './types.ts';
+import type { Detected, Field, Fit, Grid, GroundAt, Gun, Heights, Id, ProjectData, Ray, ShiftPrior, Shot, SolveOptions, Vec3, Weapon } from './types.ts';
 
 export interface ShotResult {
   shotId: Id;
@@ -36,6 +38,10 @@ export interface ShotResult {
   source?: { deg: number; tol: number };
   /** The ground heights the solve used, when they came from terrain data. */
   ground?: { crater: number; gun: number };
+  /** The crater the solve found from where the user stood (game units), with its error (m), when none was given. */
+  crater?: { x: number; y: number; sigmaM: number };
+  /** Two directions (deg) fit about equally well, so the suspected heading is required. */
+  ambiguous?: { th: [number, number] };
 }
 
 /** The gun from all shots: combined by the accuracy of each shot, or where the tracks cross without one. */
@@ -57,25 +63,115 @@ export interface ProjectResult {
   ground?: string;
   /** Where the guns can hit, from the terrain: 1 low arc, 2 only the high arc, 3 nothing. The worker sets it. */
   safe?: { grid: Grid; guns: { x: number; y: number }[] };
+  /** The weapon the solve used, the field it comes from, and the RMS fit error (deg) of each weapon. */
+  weapon: { use: Weapon; field: Field<Weapon>; rms: Record<Weapon, number | null> };
 }
 
-/** The rays of one shot, and how many sightings the solver skipped. */
-function prepare(data: ProjectData, shot: Shot, solver: SightingSolver): { rays: Ray[]; bad: number } {
+/** The error (s) of a frame time, which moves a fast shell across the image (section 12.5). The capture test measures it. */
+export const TIMESTAMP_SIGMA_S = 0.005;
+/** How far (m) the minimap puts the user off where they really stood, for a position the user typed. */
+export const OBSERVER_SIGMA_M = 10;
+/** How far (m) a crater the user typed or measured may be off. */
+export const CRATER_SIGMA_M = 1;
+/** A weapon counts as found when the other weapon fits this many times worse (section 2.2). */
+export const WEAPON_RATIO = 2;
+
+/**
+ * The rays of one shot, and how many sightings the solver skipped. Each ray gets the error of its frame time at the
+ * speed the shell moves across the image, on top of the error of its mark.
+ */
+function prepare(data: ProjectData, shot: Shot, solver: SightingSolver, speeds: Map<Id, number>): { rays: Ray[]; bad: number } {
   const list = data.sightings.filter((s) => s.shotId === shot.id && !s.excluded);
-  const rays = list.map((s) => solver.solve(s)).flatMap((r) => (r.ok ? [r.ray] : []));
+  const rays = list.flatMap((s) => {
+    const r = solver.solve(s);
+    if (!r.ok) return [];
+    const move = (speeds.get(s.id) ?? 0) * D2R * TIMESTAMP_SIGMA_S;
+    return [{ ...r.ray, sigma: Math.hypot(r.ray.sigma ?? 0, move) }];
+  });
   return { rays, bad: list.length - rays.length };
 }
 
-function options(data: ProjectData, shot: Shot, C: Vec3, heights?: Heights, ground?: GroundAt): SolveOptions {
-  const st = data.settings;
+/**
+ * The angular speed of the shell (deg/s) at each sighting: of the step to it, or for the first sighting of a run, of
+ * the step from it.
+ */
+function speedsAt(data: ProjectData, solver: SightingSolver): Map<Id, number> {
+  const to = shellSpeeds(data, solver), out = new Map(to);
+  const byTime = [...data.sightings].sort((a, b) => a.timeS - b.timeS);
+  for (const s of byTime) {
+    if (out.has(s.id)) continue;
+    const next = byTime.find((x) => x.shotId === s.shotId && x.clipId === s.clipId && x.timeS > s.timeS && to.has(x.id));
+    if (next) out.set(s.id, to.get(next.id)!);
+  }
+  return out;
+}
+
+/** The weapon ballistics and range a solve uses. */
+function options(data: ProjectData, shot: Shot, weapon: Weapon, C: Vec3, heights?: Heights, ground?: GroundAt): SolveOptions {
+  const st = data.settings, manual = st.weapon === weapon;
   return {
     center: shot.sourceDeg ?? null,
     tol: shot.sourceTolDeg ?? SOURCE_TOL_DEG,
     zGun: heights?.gun[shot.id] ?? C[2], // without terrain data, the gun stands as high as the crater
-    rmin: st.rangeMinM, rmax: st.rangeMaxM, useRange: st.limitToRange,
-    ballistics: BALLISTICS[st.weapon],
+    // the range of the settings belongs to the weapon the user picked; a weapon the solver tries has its own
+    rmin: manual ? st.rangeMinM : WEAPONS[weapon].min, rmax: manual ? st.rangeMaxM : WEAPONS[weapon].max, useRange: st.limitToRange,
+    ballistics: BALLISTICS[weapon],
     ground,
   };
+}
+
+/** A shot the solver can place: its anchor (crater, or where the user stood), and where the user stood as a prior. */
+interface Setup {
+  C: Vec3;
+  /** The crater is not known: the rays start where the user stood, and the solve finds the crater. */
+  findCrater: boolean;
+  /** Where the minimap puts the user, as a shift from the crater (m). */
+  prior?: ShiftPrior;
+}
+
+function setup(shot: Shot, heights?: Heights): Setup | null {
+  const at = anchorGame(shot);
+  if (!at || !shot.clipId) return null;
+  const C = toMeters(at, heights?.crater[shot.id]);
+  const crater = craterGame(shot), obs = shot.observer[shot.clipId];
+  const O = value(obs);
+  if (!crater || !O) return { C, findCrater: !crater };
+  // both known: the minimap position pulls the solved spot of the user, with the errors of both
+  const sObs = (sigmaOf(obs) ?? OBSERVER_SIGMA_M / GAME_UNIT_M) * GAME_UNIT_M;
+  const sCrater = shot.rangefinder ? Math.hypot(CRATER_SIGMA_M, (shot.rangefinder.distanceM ?? 0) * 0.005) : (sigmaOf(shot.crater) ?? CRATER_SIGMA_M / GAME_UNIT_M) * GAME_UNIT_M;
+  return { C, findCrater: false, prior: { s: [(O.x - crater.x) * GAME_UNIT_M, (O.y - crater.y) * GAME_UNIT_M], sigma: Math.hypot(sObs, sCrater) } };
+}
+
+/** Solves the shots of a project with one weapon, without Monte Carlo runs: the RMS fit error over all shots. */
+function weaponError(data: ProjectData, weapon: Weapon, heights?: Heights, ground?: GroundAt): number | null {
+  const solver = new SightingSolver(data, undefined, heights), speeds = speedsAt(data, solver);
+  let ss = 0, n = 0;
+  for (const shot of data.shots) {
+    const su = !shot.excluded && setup(shot, heights);
+    if (!su) continue;
+    const { rays } = prepare(data, shot, solver, speeds);
+    const sol = solveShot(rays, su.C, { ...options(data, shot, weapon, su.C, heights, ground), priors: su.prior && { [shot.clipId!]: su.prior } });
+    if (sol.error !== undefined) continue;
+    ss += sol.fit.rms ** 2 * sol.n; n += sol.n;
+  }
+  return n ? Math.sqrt(ss / n) : null;
+}
+
+/**
+ * The weapon of the project (section 12.4): each weapon table solves the shots, and the one that fits clearly better
+ * is the automatic weapon. The user's pick wins.
+ */
+function pickWeapon(data: ProjectData, heights?: Heights, ground?: GroundAt): ProjectResult['weapon'] {
+  const rms = Object.fromEntries((Object.keys(WEAPONS) as Weapon[]).map((w) => [w, weaponError(data, w, heights, ground)])) as Record<Weapon, number | null>;
+  const ranked = (Object.keys(rms) as Weapon[]).filter((w) => rms[w] != null).sort((a, b) => rms[a]! - rms[b]!);
+  const [best, next] = ranked;
+  // a fit error of a few hundredths of a degree is noise: the ratio counts from there
+  const ratio = best && next ? Math.max(rms[next]!, 0.02) / Math.max(rms[best]!, 0.02) : 1;
+  const auto: Detected<Weapon> = best
+    ? { value: best, conf: next ? confRatio(ratio, WEAPON_RATIO) : 0, ...(next && ratio < WEAPON_RATIO ? { reason: `${best} fits only ${ratio.toFixed(1)} times better than ${next}` } : {}) }
+    : { conf: 0, reason: 'no shot can be solved yet' };
+  const f: Field<Weapon> = { manual: data.settings.weapon, auto };
+  return { use: value(f) ?? best ?? 'L52', field: f, rms };
 }
 
 /**
@@ -83,12 +179,16 @@ function options(data: ProjectData, shot: Shot, C: Vec3, heights?: Heights, grou
  * hit: an elevation error of that size runs it into the ground.
  */
 const HARD_CLEARANCE_DEG = 0.3;
+/** Two directions fit about equally well when the cost of the second is less than this many times the best one. */
+const AMBIGUOUS = 2;
 
 export function solveProject(data: ProjectData, rng: Rng = Math.random, runs = MC_RUNS, heights?: Heights, ground?: GroundAt): ProjectResult {
   const exact = new SightingSolver(data, undefined, heights);
   const jittered = Array.from({ length: runs }, () => new SightingSolver(data, makeJitter(data.settings, rng), heights));
   const shots: ShotResult[] = [];
   const jumps = motionFlags(data, exact);
+  const speeds = speedsAt(data, exact);
+  const weapon = pickWeapon(data, heights, ground);
 
   for (const shot of data.shots) {
     const count = data.sightings.filter((s) => s.shotId === shot.id).length;
@@ -96,34 +196,59 @@ export function solveProject(data: ProjectData, rng: Rng = Math.random, runs = M
     const r: ShotResult = { shotId: shot.id, name: shot.name, mc: [], observers: [], notes: [] };
     shots.push(r);
     if (shot.excluded) { r.excluded = true; continue; }
-    const C = craterXyz(shot, heights?.crater[shot.id]);
-    if (!C) { r.error = 'Enter the crater X and Y in Coordinates.'; continue; }
-    r.C = C;
-    const prep = prepare(data, shot, exact);
+    const su = setup(shot, heights);
+    if (!su) { r.error = 'Enter the crater X and Y in Coordinates, or where you stood.'; continue; }
+    const clip = shot.clipId!;
+    const prep = prepare(data, shot, exact, speeds);
     if (prep.bad) r.notes.push(`The solver skipped ${prep.bad} incomplete sighting(s).`);
 
-    const opt = options(data, shot, C, heights, ground);
+    const opt: SolveOptions = { ...options(data, shot, weapon.use, su.C, heights, ground), priors: su.prior && { [clip]: su.prior } };
     if (opt.center != null) r.source = { deg: opt.center, tol: opt.tol };
-    if (heights) r.ground = { crater: C[2], gun: opt.zGun };
-    const sol = solveShot(prep.rays, C, opt);
+    const sol = solveShot(prep.rays, su.C, opt);
     if (sol.error !== undefined) { r.error = sol.error; continue; }
-    Object.assign(r, { fit: sol.fit, gun: sol.gun, n: sol.n });
-    // the estimated spots near the crater, and the positions from the minimap
-    const known = new Map(prep.rays.filter((x) => x.fixed).map((x) => [`${x.O[0]},${x.O[1]}`, [x.O[0], x.O[1], C[2]] as Vec3]));
-    r.observers = [...Object.values(sol.fit.shifts).map(([dx, dy]): Vec3 => [C[0] + dx, C[1] + dy, C[2]]), ...known.values()];
+    // without a crater the rays start where the user stood: the crater is that spot minus the shift the fit found,
+    // and the whole solution moves with it
+    const move = (s: [number, number]): [number, number] => (su.findCrater ? [-s[0], -s[1]] : [0, 0]);
+    const [mx, my] = move(sol.fit.shifts[clip]);
+    const C: Vec3 = [su.C[0] + mx, su.C[1] + my, su.C[2]];
+    r.C = C;
+    if (heights) r.ground = { crater: C[2], gun: opt.zGun };
+    Object.assign(r, { fit: sol.fit, gun: { ...sol.gun, x: sol.gun.x + mx, y: sol.gun.y + my }, n: sol.n });
+    r.observers = Object.values(sol.fit.shifts).map(([dx, dy]): Vec3 => [C[0] + dx, C[1] + dy, C[2]]);
 
+    const shifts: [number, number][] = [];
     for (const J of jittered) {
-      const m = solveShot(prepare(data, shot, J).rays, C, { ...opt, near: { th: sol.fit.th, e: sol.fit.e } });
-      if (m.error === undefined) r.mc.push({ x: m.gun.x, y: m.gun.y, th: m.fit.th });
+      const m = solveShot(prepare(data, shot, J, speeds).rays, su.C, { ...opt, near: { th: sol.fit.th, e: sol.fit.e } });
+      if (m.error !== undefined) continue;
+      const [jx, jy] = move(m.fit.shifts[clip]);
+      r.mc.push({ x: m.gun.x + jx, y: m.gun.y + jy, th: m.fit.th });
+      shifts.push(m.fit.shifts[clip]);
     }
     if (r.mc.length >= 10) {
-      r.err90 = percentile(r.mc.map((q) => Math.hypot(q.x - sol.gun.x, q.y - sol.gun.y)), 0.9);
+      r.err90 = percentile(r.mc.map((q) => Math.hypot(q.x - r.gun!.x, q.y - r.gun!.y)), 0.9);
       const dt = r.mc.map((q) => angleDiff(q.th, sol.fit.th));
       r.dirRange = [wrap360(sol.fit.th + Math.min(0, percentile(dt, 0.05))), wrap360(sol.fit.th + Math.max(0, percentile(dt, 0.95)))];
     } else {
       r.notes.push('Too few Monte Carlo runs gave a result, so the accuracy is unknown. Treat this result as rough.');
     }
+    if (su.findCrater) {
+      // the spread of the shift, and the error of the minimap position the crater hangs on
+      const [sx, sy] = sol.fit.shifts[clip], spread = shifts.length >= 10 ? Math.sqrt(shifts.reduce((a, [x, y]) => a + (x - sx) ** 2 + (y - sy) ** 2, 0) / shifts.length) : 0;
+      const sObs = (sigmaOf(shot.observer[clip]) ?? OBSERVER_SIGMA_M / GAME_UNIT_M) * GAME_UNIT_M;
+      r.crater = { x: C[0] / GAME_UNIT_M, y: C[1] / GAME_UNIT_M, sigmaM: Math.hypot(spread, sObs) };
+    }
+    if (su.prior) {
+      // the minimap position against where the rays put the user (section 10.3)
+      const [sx, sy] = sol.fit.shifts[clip], d = Math.hypot(sx - su.prior.s[0], sy - su.prior.s[1]);
+      if (d > 3 * su.prior.sigma && d > OBSERVER_SIGMA_M) r.notes.push(`The sightings put you ${d.toFixed(0)} m from where the minimap and the crater put you. Check the crater and the impact time.`);
+    }
 
+    // two directions that fit about equally well: the user must say which (section 12.3)
+    const second = sol.fit.second;
+    if (opt.center == null && second && second.cost < AMBIGUOUS * Math.max(second.best, costFloor(sol.n))) {
+      r.ambiguous = { th: [sol.fit.th, second.th] };
+      r.notes.push(`Two directions fit the sightings about equally well: ${sol.fit.th.toFixed(0)} and ${second.th.toFixed(0)} deg. Give the suspected heading in Coordinates.`);
+    }
     // the terrain only earns a note when it makes the shot impossible or hard
     if (sol.fit.ignoresTerrain) r.notes.push('No flight that fits the sightings clears the terrain between gun and crater, so this shot looks impossible. The result ignores the terrain.');
     else if (sol.fit.clearance && sol.fit.clearance.deg < HARD_CLEARANCE_DEG) {
@@ -139,7 +264,7 @@ export function solveProject(data: ProjectData, rng: Rng = Math.random, runs = M
     if (sol.fit.excess > 0.5) r.notes.push('The fit error is high. Check the FOV, the headings and the marks.');
   }
 
-  return { shots, guns: groupGuns(shots) };
+  return { shots, guns: groupGuns(shots), weapon };
 }
 
 // Two gun estimates agree when their difference lies within 6 standard deviations of their combined Monte Carlo

@@ -5,6 +5,8 @@
   import Spinner from '../Spinner.svelte';
   import { currentShot, ui, type Tool } from '../../lib/state/project.svelte.ts';
   import type { Sighting } from '../../lib/solver/types.ts';
+  import FieldTag from '../FieldTag.svelte';
+  import { impactSigma, impactTime, value } from '../../lib/solver/field.ts';
 
   let { time, sighting, pending, compass, onimpact, onclear }: {
     time: number; sighting: Sighting | undefined; pending: boolean; onimpact: () => void; onclear: () => void;
@@ -13,7 +15,9 @@
   } = $props();
 
   const shot = $derived(currentShot());
-  const impact = $derived(ui.clipId ? shot.impactTimeS[ui.clipId] : undefined);
+  const field = $derived(ui.clipId ? shot.impact[ui.clipId] : undefined);
+  const interval = $derived(value(field));
+  const impact = $derived(interval && impactTime(interval));
 
   const TOOLS: [Exclude<Tool, null>, string, string, string, typeof Crosshair][] = [
     ['shell', 'Mark shell', 'S', 'Click the shell in flight, on 2 or more frames. Drag a mark to move it.', Crosshair],
@@ -37,7 +41,10 @@
     <dl class="dl min-w-0 text-[12px]" data-testid="impact-status">
       <dt>Impact</dt>
       {#if impact != null}
-        <dd class="num">{impact.toFixed(3)} s</dd>
+        <dd class="num flex flex-wrap items-center gap-x-2" title="Between the last clean frame {interval!.a.toFixed(3)} s and the first frame of the impact {interval!.b.toFixed(3)} s">
+          {impact.toFixed(3)} +/-{impactSigma(interval!).toFixed(3)} s
+          <FieldTag kind="impact" {field} onreset={() => field && (field.manual = undefined)} fmt={(v) => `${impactTime(v as never).toFixed(3)} s`} />
+        </dd>
         <dt>Before impact</dt><dd class="num">{time < impact ? `${(impact - time).toFixed(3)} s` : '-'}</dd>
       {:else}
         <dd class="text-warn" title="Go to the frame of the explosion and mark it with Impact frame (I).">not marked in this clip</dd>

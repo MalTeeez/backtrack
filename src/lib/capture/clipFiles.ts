@@ -46,6 +46,7 @@ export async function readAnnotation(f: File): Promise<Annotation> {
   }
   if (a?.format !== FORMAT || !Array.isArray(a.sightings) || !Array.isArray(a.shots)) throw new Error(`${f.name} is not a Backtrack annotation file.`);
   if (a.version > VERSION) throw new Error(`${f.name} comes from a newer Backtrack. Update the app to import it.`);
+  if (a.version < VERSION) throw new Error(`${f.name} comes from an older Backtrack, whose files this version does not read.`);
   return a;
 }
 

@@ -4,7 +4,9 @@
   import ResultMap from '../result/ResultMap.svelte';
   import ShotResult from '../result/ShotResult.svelte';
   import CopyButton from '../result/CopyButton.svelte';
-  import { clipData, project } from '../../lib/state/project.svelte.ts';
+  import { WEAPONS, clipData, clipMap, ui } from '../../lib/state/project.svelte.ts';
+  import { autoValue, fieldWarning } from '../../lib/solver/field.ts';
+  import type { Weapon } from '../../lib/solver/types.ts';
   import { solve, solved } from '../../lib/state/solve.svelte.ts';
 
   let { compact = false }: { compact?: boolean } = $props();
@@ -29,7 +31,7 @@
   <section class="card flex flex-col {compact ? 'min-h-0' : 'min-h-[60vh]'}">
     <header class="card-head"><h2 class="card-title">Map</h2><span class="card-meta">{#if solving}<Spinner size={12} /> Solving...{:else}game coordinates{/if}</span></header>
     <div class="min-h-0 flex-1">
-      {#if result}<ResultMap {result} map={project.settings.map} />{:else}<p class="m-0 flex items-center justify-center gap-2 p-6 text-muted"><Spinner /> Solving...</p>{/if}
+      {#if result}<ResultMap {result} clipId={ui.clipId} map={ui.mapShown.result ?? clipMap(ui.clipId)} />{:else}<p class="m-0 flex items-center justify-center gap-2 p-6 text-muted"><Spinner /> Solving...</p>{/if}
     </div>
   </section>
 
@@ -72,6 +74,15 @@
       </div>
     {/if}
     {#if result?.ground}<p class="note info">{result.ground}</p>{/if}
+    {#if result && result.shots.some((r) => r.fit)}
+      {@const w = result.weapon}
+      {#if w.field.manual == null && autoValue(w.field) == null && w.field.auto?.value}
+        <p class="note warn" data-testid="weapon-unclear">The weapon is unclear ({w.field.auto.reason}). The result uses the {WEAPONS[w.use].name}. Pick the weapon in Coordinates.</p>
+      {:else}
+        {@const warn = fieldWarning('weapon', w.field, (x) => WEAPONS[x as Weapon].name)}
+        {#if warn}<p class="note warn">Weapon: {warn}</p>{/if}
+      {/if}
+    {/if}
     {#each result?.shots ?? [] as r (r.shotId)}
       {@const gi = result!.guns.findIndex((gn) => gn.shotIds.includes(r.shotId))}
       <ShotResult {r} gun={result!.guns.length > 1 && gi >= 0 ? gunName(gi) : undefined} />
