@@ -1,6 +1,7 @@
 <script lang="ts">
   import CopyButton from './CopyButton.svelte';
   import UseToggle from '../UseToggle.svelte';
+  import MissChart from './MissChart.svelte';
   import { project } from '../../lib/state/project.svelte.ts';
   import type { ShotResult } from '../../lib/solver/result.ts';
 
@@ -47,9 +48,12 @@
         {#if r.ground}<dt>Gun height</dt><dd>{(r.ground.gun - r.ground.crater).toFixed(0)} m <span class="text-muted">relative to the crater, from the terrain</span></dd>{/if}
         {#if r.crater}<dt>Crater</dt><dd title="Solved from where you stood and the end of the flight">X {r.crater.x.toFixed(2)}  Y {r.crater.y.toFixed(2)} <span class="text-muted">(+/-{f0(r.crater.sigmaM)} m, solved)</span></dd>{/if}
         <dt>You stood</dt><dd>{#each Object.values(r.fit.shifts) as [dx, dy], i}{i ? ', ' : ''}{f0(Math.hypot(dx, dy))} m from the crater{/each}</dd>
+        {#if r.independent}<dt title="A straight flight with gravity over the last second, without the weapon table: a second opinion on the direction (automation plan section 12.6)">Straight flight</dt><dd>{r.independent.dirDeg.toFixed(1)} deg <span class="text-muted">({(((r.independent.dirDeg - r.fit.th + 540) % 360) - 180).toFixed(1)} deg from the solver)</span></dd>{/if}
+        {#if r.observerOffM != null}<dt title="How far the sightings put you from the minimap position. Over many clips this shows a bias of the solver (automation plan section 13).">Minimap vs solved</dt><dd>{f0(r.observerOffM)} m</dd>{/if}
         <dt>Fit error</dt><dd title="How far the rays miss the fitted flight. Near the impact the shell is close, so a few meters are several degrees there.">{r.fit.missM.toFixed(1)} m, {r.fit.rms.toFixed(2)} deg RMS</dd>
         <dt>Sightings</dt><dd>{r.n}</dd>
       </dl>
+      <MissChart {r} />
     {/if}
     {#each r.notes as n}<p class="note warn">{n}</p>{/each}
   </div>

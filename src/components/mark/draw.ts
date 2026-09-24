@@ -1,8 +1,13 @@
 /** Draws the marks of a sighting on a canvas, and finds the mark under the pointer. */
-import { edgeReport, focalPx } from '../../lib/solver/camera.ts';
+import { edgeReport, focalPx, project } from '../../lib/solver/camera.ts';
 import { fieldState, value, type FieldState } from '../../lib/solver/field.ts';
 import type { Aim, SightingResult } from '../../lib/solver/sightings.ts';
-import type { Pt, Settings, Sighting } from '../../lib/solver/types.ts';
+import type { Pt, Section, Settings, Sighting } from '../../lib/solver/types.ts';
+import { frameCameraAt } from '../../lib/state/sections.ts';
+import { compassRegion } from '../../lib/video/compass.ts';
+import { sameFrame } from '../../lib/video/frames.ts';
+import { minimapRegion } from '../../lib/vision/hud.ts';
+import { refToFrame } from '../../lib/vision/rotation.ts';
 
 export const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -78,8 +83,9 @@ export function drawMarks(g: CanvasRenderingContext2D, s: Sighting | undefined, 
         g.beginPath(); g.arc(p.x, p.y, 3 * lw, 0, 7); g.stroke();
       });
     });
-    const state = fieldState('shell', s.shell);
-    const shell = value(s.shell) ?? s.shell.auto?.value;
+    // guide lines come without a shell
+    const state = s.shell ? fieldState('shell', s.shell) : 'manual';
+    const shell = s.shell && (value(s.shell) ?? s.shell.auto?.value);
     if (shell) {
       const p = T(shell), r = 8 * lw;
       g.strokeStyle = same(active, { kind: 'shell' }) ? MARK.grab : SHELL_COLORS[state];
@@ -133,7 +139,7 @@ export function markNotes(
   speed?: number,
 ): Note[] {
   const out: Note[] = [];
-  const noCamera = s && !s.sameCameraAsPrevious
+  const noCamera = s
     ? [...(s.edges.length || value(s.pitch) != null ? [] : ['No vertical edge yet.']), ...(value(s.heading) == null ? ['No compass heading yet.'] : [])]
     : [];
   const W = s?.frameW ?? size.w, H = s?.frameH ?? size.h;
@@ -266,4 +272,96 @@ export function drawNotes(g: CanvasRenderingContext2D, notes: Note[], k: number,
   g.globalAlpha = 1;
   g.textBaseline = 'alphabetic';
   return boxes;
+}
+
+/** What the detection of a section used and found on one frame, in video pixels (automation plan section 5.4). */
+export interface DetectionView {
+  /** The rotation of the frame and what became of its shell mark. */
+  status: { text: string; ok: boolean };
+  /** The horizon of the frame camera, a point per whole degree of heading. */
+  horizon: { p: Pt; deg: number }[];
+  /** The shell track of the section and the impact, turned into this frame; the mark of this frame. */
+  track: Pt[]; here: Pt | null; impact: Pt | null;
+  /** The HUD parts the detection reads, with what it found there. */
+  boxes: { x: number; y: number; w: number; h: number; label: string }[];
+}
+
+export function detectionView(sec: Section, t: number, w: number, h: number, st: Pick<Settings, 'fovDeg' | 'fovAxis'>): DetectionView {
+  const f = sec.frames.find((x) => sameFrame(x.t, t)), R = f?.ok ? f.R : null;
+  const K = { f: focalPx(w, h, st.fovDeg, st.fovAxis), cx: w / 2 - 0.5, cy: h / 2 - 0.5 };
+  // the vision code puts pixel centers on whole numbers, the app at .5
+  const toFrame = (x: number, y: number) => { const p = R && refToFrame(K, R, { x, y }); return p ? { x: p.x + 0.5, y: p.y + 0.5 } : null; };
+  const mark = sec.marks.find((m) => sameFrame(m.t, t)), drop = sec.dropped.find((d) => sameFrame(d.t, t));
+  const text = !f ? 'Outside the detection'
+    : `${R ? `Rotation: ${f.inliers} matches, fit ${f.fitPx.toFixed(2)} px` : `No sure rotation (${f.inliers} matches)`}${mark ? `, shell score ${mark.score.toFixed(0)}` : drop ? `, ${drop.reason}` : ''}`;
+  const cam = frameCameraAt(sec, t), horizon: DetectionView['horizon'] = [];
+  if (cam) {
+    const [ch, cp, cr] = [cam.h.value!, cam.p.value!, cam.r.value!];
+    for (let a = Math.floor(ch - 90); a <= ch + 90; a++) {
+      const p = project([Math.sin((a * Math.PI) / 180) * 1000, Math.cos((a * Math.PI) / 180) * 1000, 0], [0, 0, 0], w, h, K.f, ch, cp, cr);
+      if (p && p.x > -0.2 * w && p.x < 1.2 * w) horizon.push({ p, deg: ((a % 360) + 360) % 360 });
+    }
+  }
+  const c = compassRegion(w, h), m = minimapRegion(w, h), at = sec.minimap?.at.value;
+  return {
+    status: { text, ok: !!R && !drop },
+    horizon,
+    track: sec.marks.flatMap((q) => toFrame(q.rx, q.ry) ?? []),
+    here: mark ? { x: mark.x, y: mark.y } : null,
+    impact: sec.impact.at ? toFrame(sec.impact.at.x, sec.impact.at.y) : null,
+    boxes: [
+      { ...c, label: cam ? `Compass: the camera looks at ${cam.h.value!.toFixed(1)} deg` : 'Compass' },
+      { ...m, label: at ? `Minimap: X ${at.x.toFixed(2)} Y ${at.y.toFixed(2)}` : 'Minimap: no match' },
+    ],
+  };
+}
+
+/**
+ * Draws a detection view over a video of w x h pixels: T maps video pixels to the canvas, k is the device pixel ratio.
+ * Everything stays inside the video.
+ */
+export function drawDetection(g: CanvasRenderingContext2D, v: DetectionView, T: (p: Pt) => Pt, k: number, w: number, h: number) {
+  const v0 = T({ x: 0, y: 0 }), v1 = T({ x: w, y: h });
+  g.save();
+  g.beginPath(); g.rect(v0.x, v0.y, v1.x - v0.x, v1.y - v0.y); g.clip();
+  const cased = (path: () => void, color: string, w: number) => {
+    g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = w + 2 * k; path(); g.stroke();
+    g.strokeStyle = color; g.lineWidth = w; path(); g.stroke();
+  };
+  g.font = `${11 * k}px 'Commit Mono', ui-monospace, monospace`;
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  // the horizon with the heading: a tick per degree, a longer one and the number every 5
+  if (v.horizon.length > 1) {
+    cased(() => { g.beginPath(); v.horizon.forEach(({ p }, i) => { const q = T(p); if (i) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); }); }, 'rgba(255,255,255,0.7)', 1 * k);
+    g.fillStyle = '#ffffff'; g.textAlign = 'center';
+    for (const { p, deg } of v.horizon) {
+      const q = T(p), len = (deg % 5 ? 4 : 9) * k;
+      cased(() => { g.beginPath(); g.moveTo(q.x, q.y); g.lineTo(q.x, q.y - len); }, 'rgba(255,255,255,0.8)', 1 * k);
+      if (deg % 5 === 0) { g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 3 * k; g.strokeText(String(deg), q.x, q.y - 12 * k); g.fillText(String(deg), q.x, q.y - 12 * k); }
+    }
+    g.textAlign = 'start';
+  }
+  // the track of the shell in this frame
+  if (v.track.length > 1) {
+    cased(() => { g.beginPath(); v.track.forEach((p, i) => { const q = T(p); if (i) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); }); }, 'rgba(95,212,196,0.9)', 1.5 * k);
+    g.fillStyle = 'rgba(95,212,196,0.9)';
+    for (const p of v.track) { const q = T(p); g.beginPath(); g.arc(q.x, q.y, 2 * k, 0, 7); g.fill(); }
+  }
+  if (v.here) { const q = T(v.here); cased(() => { g.beginPath(); g.arc(q.x, q.y, 7 * k, 0, 7); }, '#ffffff', 1.5 * k); }
+  if (v.impact) { const q = T(v.impact); cased(() => { g.beginPath(); g.arc(q.x, q.y, 12 * k, 0, 7); }, '#e5484d', 2 * k); }
+  // the HUD parts: a dashed box with its label above
+  for (const b of v.boxes) {
+    const a = T(b), z = T({ x: b.x + b.w, y: b.y + b.h });
+    g.setLineDash([5 * k, 4 * k]);
+    cased(() => { g.beginPath(); g.rect(a.x, a.y, z.x - a.x, z.y - a.y); }, 'rgba(232,153,58,0.9)', 1.25 * k);
+    g.setLineDash([]);
+    const y = a.y > 20 * k ? a.y - 5 * k : z.y + 14 * k;
+    g.strokeStyle = 'rgba(0,0,0,0.75)'; g.lineWidth = 3 * k; g.strokeText(b.label, a.x, y);
+    g.fillStyle = '#ffffff'; g.fillText(b.label, a.x, y);
+  }
+  // the status of the frame, in the top left corner of the video on screen
+  const pad = 6 * k, tw = g.measureText(v.status.text).width, x = Math.max(0, v0.x) + pad, y = Math.max(0, v0.y) + pad;
+  g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(x, y, tw + 2 * pad, 18 * k);
+  g.fillStyle = v.status.ok ? '#ffffff' : '#e8993a'; g.fillText(v.status.text, x + pad, y + 13 * k);
+  g.restore();
 }

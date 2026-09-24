@@ -21,7 +21,8 @@ function run(seed: number, stallAt = -1, repeatAt = -1, from = 0.8) {
     const px = shellPx(tr, t + (stallAt >= 0 && i >= stallAt ? 0.25 : 0) - (i === repeatAt ? 1 / 12 : 0))!;
     p.sightings.push({
       ...first, id: `s${i}`, timeS: t, shell: { manual: { x: px.x + n(), y: px.y + n() } },
-      edges: i ? [] : first.edges, heading: i ? {} : first.heading, sameCameraAsPrevious: i > 0,
+      // one stabilized section: every frame has the camera of one fit
+      edges: [], heading: { auto: { value: tr.camH, sigma: 0.05, conf: 0.99, group: 'sec' } }, pitch: { auto: { value: tr.camP, sigma: 0.05, conf: 0.99, group: 'sec' } },
     });
   }
   return p;

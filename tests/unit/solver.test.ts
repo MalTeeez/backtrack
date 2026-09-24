@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { centered, dirTo, focalPx, pitchFromEdge, project, rayWorld } from '../../src/lib/solver/camera.ts';
 import { secondMinimum } from '../../src/lib/solver/ballisticFit.ts';
+import { independentDirection } from '../../src/lib/solver/independent.ts';
 import { BALLISTICS, landing, simulate } from '../../src/lib/solver/ballistics.ts';
-import { seeded } from '../../src/lib/solver/montecarlo.ts';
+import { makeJitter, seeded } from '../../src/lib/solver/montecarlo.ts';
 import { fuse, solveProject } from '../../src/lib/solver/result.ts';
 import { EYE_HEIGHT_M, SightingSolver, craterGame } from '../../src/lib/solver/sightings.ts';
 import { solveShot } from '../../src/lib/solver/solve.ts';
@@ -164,13 +165,14 @@ describe('sightings', () => {
     expect(zoomed.el).toBeCloseTo(plain.el, 6);
   });
 
-  test('"same camera as previous" copies the earlier camera', () => {
+  test('the Monte Carlo runs move the values of one group together', () => {
     const data = sceneProject(tr, { n: 4 });
-    for (const s of data.sightings.slice(1)) { s.edges = []; s.heading = {}; s.sameCameraAsPrevious = true; }
-    const r = new SightingSolver(data).solve(data.sightings[3]);
-    if (!r.ok) throw new Error(r.error);
-    expect(r.cam.source).toBe('copied');
-    expect(r.cam.h).toBeCloseTo(tr.camH, 5);
+    for (const s of data.sightings) { s.edges = []; s.heading = { auto: { value: tr.camH, sigma: 1, conf: 0.9, group: 'g' } }; s.pitch = { auto: { value: tr.camP, sigma: 1, conf: 0.9, group: 'g' } }; }
+    const J = makeJitter(data.settings, seeded(2)), solver = new SightingSolver(data, J);
+    const cams = data.sightings.map((s) => { const a = solver.aim(s); if (!a.ok) throw new Error(a.error); return a.cam; });
+    expect(new Set(cams.map((c) => c.h.toFixed(9))).size).toBe(1);
+    expect(new Set(cams.map((c) => c.p.toFixed(9))).size).toBe(1);
+    expect(cams[0].h).not.toBeCloseTo(tr.camH, 5);
   });
 
   test('the solver reports missing data and bad edges', () => {
@@ -226,6 +228,18 @@ describe('project', () => {
     expect(r.err90).toBeGreaterThan(0);
   });
 
+  test('each sighting against the fit: no miss on exact data, and the spots of a walk follow it', () => {
+    const wt = makeScene({ walk: [1.06, 1.06] }), data = sceneProject(wt, { n: 15, walk: 'exact' });
+    const r = solveProject(data, seeded(1), 0).shots[0];
+    expect(r.sightings).toHaveLength(15);
+    for (const s of r.sightings!) {
+      expect(Math.hypot(s.along, s.cross)).toBeLessThan(0.02);
+      // where the user was on the frame of the sighting, at the time of that frame
+      const O = wt.observerAt(data.sightings.find((x) => x.id === s.id)!.timeS);
+      expect(Math.hypot(s.O[0] - O[0], s.O[1] - O[1])).toBeLessThan(2);
+    }
+  });
+
   test('a shot left out of the calculation has no result', () => {
     const data = sceneProject(tr, { n: 15 });
     data.shots[0].excluded = true;
@@ -238,7 +252,8 @@ describe('project', () => {
     const data = sceneProject(tr, { n: 8 });
     data.shots[0].observer.clip = { auto: { value: { x: tr.O[0] / 100 + 0.05, y: tr.O[1] / 100 }, sigma: 0.05, conf: 0.9 } };
     const r = solveProject(data, seeded(1), 0).shots[0];
-    expect(dist(r.gun!, tr.G)).toBeLessThan(3);
+    // the minimap is 5 m off with a sigma of 5 m: it pulls the spot and the gun a little
+    expect(dist(r.gun!, tr.G)).toBeLessThan(5);
     expect(dist({ x: r.observers[0][0], y: r.observers[0][1] }, tr.O)).toBeLessThan(5);
     expect(r.notes.some((n) => n.includes('minimap'))).toBe(false);
     data.shots[0].observer.clip = { manual: { x: tr.O[0] / 100 + 1, y: tr.O[1] / 100 } };
@@ -332,5 +347,20 @@ describe('tracks', () => {
     expect(minCrossingAngle([10, 20])).toBeCloseTo(10, 9);
     expect(minCrossingAngle([10, 185])).toBeCloseTo(5, 9);
     expect(minCrossingAngle([0, 90, 45])).toBeCloseTo(45, 9);
+  });
+});
+
+describe('independent model', () => {
+  test('a straight flight with gravity over the last second points back toward the gun', () => {
+    const rays = exactRays(makeScene()).filter((r) => r.tau <= 3);
+    // denser rays near the impact: every 0.1 s of the last 1.2 s
+    const tr2 = makeScene(), O: [number, number, number] = [tr2.C[0], tr2.C[1], tr2.C[2] + EYE_HEIGHT_M];
+    for (let tau = 0.1; tau <= 1.2; tau += 0.1) {
+      const px = shellPx(tr2, tr2.impactTime - tau)!;
+      rays.push({ O, D: rayWorld(centered(px, tr2.W, tr2.H), tr2.f, tr2.camH, tr2.camP), tau, clip: 'clip' });
+    }
+    const r = independentDirection(rays.filter((x) => x.tau <= 1.2))!;
+    const toGun = (tr2.dirDeg + 180) % 360;
+    expect(Math.abs(((r.dirDeg - toGun + 540) % 360) - 180)).toBeLessThan(2);
   });
 });

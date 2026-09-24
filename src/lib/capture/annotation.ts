@@ -69,12 +69,13 @@ export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make:
   if (!p.sightings.length) {
     const w = s.weapon && WEAPONS[s.weapon] ? s.weapon : undefined;
     Object.assign(p.settings, {
-      fovDeg: s.fovDeg, fovAxis: s.fovAxis, weapon: w,
+      weapon: w,
       rangeMinM: s.rangeMinM ?? WEAPONS[w ?? 'L52'].min, rangeMaxM: s.rangeMaxM ?? WEAPONS[w ?? 'L52'].max, limitToRange: s.limitToRange ?? p.settings.limitToRange,
     });
   }
-  else if (s.fovDeg !== p.settings.fovDeg || s.fovAxis !== p.settings.fovAxis) {
-    notes.push(`The file used a FOV of ${s.fovDeg} deg (${s.fovAxis === 'h' ? 'horizontal' : 'vertical'}). The project keeps ${p.settings.fovDeg} deg.`);
+  // the FOV is a setting of the user (prefs.svelte.ts), not of a file
+  if (s.fovDeg !== p.settings.fovDeg || s.fovAxis !== p.settings.fovAxis) {
+    notes.push(`The file used a FOV of ${s.fovDeg} deg (${s.fovAxis === 'h' ? 'horizontal' : 'vertical'}). The settings say ${p.settings.fovDeg} deg: change them if the file is right.`);
   }
 
   // the map of the clip, unless the user already picked one
@@ -118,7 +119,7 @@ export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make:
     if (p.sightings.some((y) => y.clipId === clipId && y.shotId === shotId && sameFrame(y.timeS, x.timeS))) { again++; continue; }
     if (x.frameW !== video.width || x.frameH !== video.height) otherSize++;
     const { shot: _, ...rest } = structuredClone(x);
-    p.sightings.push({ ...rest, id: make.uid(), shotId, clipId, edges: rest.edges ?? [], sameCameraAsPrevious: !!rest.sameCameraAsPrevious });
+    p.sightings.push({ ...rest, id: make.uid(), shotId, clipId, edges: rest.edges ?? [] });
   }
   if (again) notes.push(`${again} sighting(s) of the file were already there and were skipped.`);
   if (otherSize) notes.push(`The file has ${otherSize} sighting(s) from a ${a.sightings[0].frameW}x${a.sightings[0].frameH} video, but this video is ${video.width}x${video.height}. Check the marks.`);

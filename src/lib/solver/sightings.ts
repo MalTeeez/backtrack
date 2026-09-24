@@ -1,5 +1,5 @@
 /** Turns a sighting into a camera and a ray, and gives the quality warnings of each sighting (plan sections 3 and 6). */
-import { PITCH_SIGMA_MAX, azEl, centered, edgeReport, focalPx, rayWorld } from './camera.ts';
+import { D2R, PITCH_SIGMA_MAX, azEl, centered, edgeReport, focalPx, rayWorld } from './camera.ts';
 import { impactSigma, impactTime, sigmaOf, value } from './field.ts';
 import type { Heights, Id, ProjectData, Pt, Ray, Shot, Sighting, Vec3, XY } from './types.ts';
 
@@ -12,6 +12,9 @@ export const GAME_UNIT_M = 100;
  */
 export const EYE_HEIGHT_M = 1.7;
 
+/** The error (deg) of a pitch the user typed. */
+const TYPED_PITCH_SIGMA = 0.1;
+
 /** How far off (+/- deg) a suspected heading may be, when the user gives no other value. */
 export const SOURCE_TOL_DEG = 30;
 
@@ -19,18 +22,20 @@ export const SOURCE_TOL_DEG = 30;
 export interface Jitter {
   /** Pixels, one draw per coordinate, with the sigma of an automatic mark or the mark accuracy of the settings. */
   px: (sigma?: number) => number;
-  /** Degrees, with the sigma of an automatic heading or the compass accuracy of the settings. */
-  heading: (sigma?: number) => number;
-  /** Degrees of an automatic pitch or roll, with its sigma. */
-  angle: (sigma: number) => number;
+  /** Degrees, with the sigma of an automatic heading or the compass accuracy of the settings. One draw per group. */
+  heading: (sigma?: number, group?: string) => number;
+  /** Degrees of an automatic pitch or roll, with its sigma. One draw per group. */
+  angle: (sigma: number, group?: string) => number;
   /** Seconds, the same for every sighting in a clip: somewhere in the impact interval of half width `half`. */
   impact: (clipId: Id, half: number) => number;
 }
 
 export interface Camera {
   h: number; p: number; r: number;
-  /** Where the pitch comes from: the marked edges, the automatic value, the value the user typed, or an earlier sighting. */
-  source: 'edges' | 'auto' | 'typed' | 'copied';
+  /** The angular error (deg) of the camera: its heading and its pitch. */
+  sigma: number;
+  /** Where the pitch comes from: the marked edges, the automatic value, or the value the user typed. */
+  source: 'edges' | 'auto' | 'typed';
 }
 
 export type Aim =
@@ -61,13 +66,13 @@ export const observerGame = (s: Pick<Shot, 'observer' | 'clipId'>): XY | null =>
  */
 export const anchorGame = (s: Shot): XY | null => craterGame(s) ?? observerGame(s);
 
+/** The group of an automatic value the solver uses (its error is shared), per kind of value. */
+const groupOf = (f: Sighting['heading'], kind: string) => (f.manual == null && f.auto?.group ? `${kind}:${f.auto.group}` : undefined);
+
 /** A game point in meters, at a ground height. */
 export const toMeters = (p: XY, ground = 0): Vec3 => [p.x * GAME_UNIT_M, p.y * GAME_UNIT_M, ground];
 
-/**
- * Solves the sightings of a project. Each Monte Carlo run gets its own instance, so a copied camera
- * gets the same random errors as its source.
- */
+/** Solves the sightings of a project. Each Monte Carlo run gets its own instance with its own random errors. */
 export class SightingSolver {
   private cams = new Map<Id, { cam?: Camera; error?: string; warnings: string[] }>();
   private readonly shots = new Map<Id, Shot>();
@@ -95,8 +100,8 @@ export class SightingSolver {
   }
 
   /** The pitch: typed by the user, from the marked edges, or automatic, in that order. */
-  private pitch(s: Sighting, warnings: string[]): { p: number; source: Camera['source'] } | null {
-    if (s.pitch.manual != null) return { p: s.pitch.manual, source: 'typed' };
+  private pitch(s: Sighting, warnings: string[]): { p: number; sigma: number; source: Camera['source'] } | null {
+    if (s.pitch.manual != null) return { p: s.pitch.manual, sigma: TYPED_PITCH_SIGMA, source: 'typed' };
     if (s.edges.length) {
       const rep = edgeReport(s.edges.map(([a, b]) => [this.jp(a), this.jp(b)] as [Pt, Pt]), s.frameW, s.frameH, this.f(s), this.data.settings.markSigmaPx);
       rep.edges.forEach((e, i) => {
@@ -106,10 +111,10 @@ export class SightingSolver {
       if (rep.pitch != null && rep.sigma > PITCH_SIGMA_MAX) {
         warnings.push(`The pitch from the edges is only accurate to +/-${rep.sigma.toFixed(1)} deg. A longer edge nearer the side of the frame might give a more exact result.`);
       }
-      if (rep.pitch != null) return { p: rep.pitch, source: 'edges' };
+      if (rep.pitch != null) return { p: rep.pitch, sigma: rep.sigma, source: 'edges' };
     }
     const auto = value(s.pitch);
-    return auto == null ? null : { p: auto + (this.J ? this.J.angle(sigmaOf(s.pitch) ?? 0) : 0), source: 'auto' };
+    return auto == null ? null : { p: auto + (this.J ? this.J.angle(sigmaOf(s.pitch) ?? 0, groupOf(s.pitch, 'p')) : 0), sigma: sigmaOf(s.pitch) ?? PITCH_SIGMA_MAX, source: 'auto' };
   }
 
   private computeOwnCamera(s: Sighting): { cam?: Camera; error?: string; warnings: string[] } {
@@ -118,36 +123,17 @@ export class SightingSolver {
     if (pitch == null && heading == null) return { error: 'This sighting has no camera data. Mark a vertical edge and type the compass heading.', warnings };
     if (pitch == null) return { error: 'This sighting has no pitch. Mark a vertical edge.', warnings };
     if (heading == null) return { error: 'This sighting has no heading. Type the compass heading.', warnings };
-    const r = (value(s.roll) ?? 0) + (this.J ? this.J.angle(sigmaOf(s.roll) ?? 0) : 0);
-    const h = heading + (this.J ? this.J.heading(sigmaOf(s.heading)) : 0);
-    return { cam: { h, p: pitch.p, r, source: pitch.source }, warnings };
-  }
-
-  /** The camera of an earlier sighting in the same clip. */
-  private previousCamera(s: Sighting) {
-    const earlier = this.data.sightings
-      .filter((x) => x.clipId === s.clipId && x.timeS < s.timeS && !x.sameCameraAsPrevious)
-      .sort((a, b) => b.timeS - a.timeS);
-    for (const x of earlier) {
-      const c = this.ownCamera(x);
-      if (c.cam) return c.cam;
-    }
-    return null;
+    const r = (value(s.roll) ?? 0) + (this.J ? this.J.angle(sigmaOf(s.roll) ?? 0, groupOf(s.roll, 'r')) : 0);
+    const h = heading + (this.J ? this.J.heading(sigmaOf(s.heading), groupOf(s.heading, 'h')) : 0);
+    const sh = sigmaOf(s.heading) ?? this.data.settings.compassSigmaDeg;
+    return { cam: { h, p: pitch.p, r, sigma: Math.hypot(sh, pitch.sigma), source: pitch.source }, warnings };
   }
 
   /** The camera and the direction to the shell, from the marks of the sighting alone. */
   aim(s: Sighting): Aim {
-    let cam: Camera, warnings: string[] = [];
-    if (s.sameCameraAsPrevious) {
-      const prev = this.previousCamera(s);
-      if (!prev) return { ok: false, error: 'No earlier sighting in this clip has a camera to copy.', warnings };
-      cam = { ...prev, source: 'copied' };
-    } else {
-      const own = this.ownCamera(s);
-      warnings = own.warnings;
-      if (!own.cam) return { ok: false, error: own.error!, warnings };
-      cam = own.cam;
-    }
+    const own = this.ownCamera(s), warnings = own.warnings;
+    if (!own.cam) return { ok: false, error: own.error!, warnings };
+    const cam = own.cam;
     const shell = value(s.shell);
     if (!shell) return { ok: false, error: s.shell.auto?.reason ? `Mark the shell (${s.shell.auto.reason}).` : 'Mark the shell.', warnings };
     const D = rayWorld(centered(this.jp(shell, sigmaOf(s.shell)), s.frameW, s.frameH), this.f(s), cam.h, cam.p, cam.r);
@@ -167,9 +153,13 @@ export class SightingSolver {
     if (tau <= 0) return { ok: false, error: 'This sighting is at or after the impact.', warnings };
     const at = anchorGame(shot!);
     if (!at) return { ok: false, error: 'The crater of this shot has no X and Y yet, and where you stood is not known either.', warnings };
-    // ponytail: the user stands at the height of the crater; the terrain at the observer would be better on hills
     const C = toMeters(at, this.heights?.crater[shot!.id]);
-    const sigma = (sigmaOf(s.shell) ?? this.data.settings.markSigmaPx) / this.f(s);
-    return { ok: true, ray: { O: [C[0], C[1], C[2] + EYE_HEIGHT_M], D, tau, clip: s.clipId, sigma }, az, el, cam, warnings };
+    // ponytail: one ground height for the whole clip, where the user stood at the impact; a walk up a hill keeps it
+    const z = this.heights?.observer?.[shot!.id] ?? C[2];
+    // the mark and the camera; the error of the frame time comes later, with the speed of the shell (result.ts)
+    const sigma = Math.hypot((sigmaOf(s.shell) ?? this.data.settings.markSigmaPx) / this.f(s), cam.sigma * D2R);
+    // a user who walks: the ray starts where they stood on this frame (the solver finds where they stood at the impact)
+    const [wx, wy] = s.walkM ?? [0, 0];
+    return { ok: true, ray: { O: [C[0] + wx, C[1] + wy, z + EYE_HEIGHT_M], D, tau, clip: s.clipId, sighting: s.id, sigma }, az, el, cam, warnings };
   }
 }

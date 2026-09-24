@@ -12,7 +12,11 @@ export interface XY { x: number; y: number }
  * What a detector found for a value (automation plan section 2): the value, its standard deviation in the unit of the
  * value, and a confidence from 0 to 1. Below REQUIRED_BELOW (field.ts) the value does not count, and `reason` says why.
  */
-export interface Detected<T> { value?: T; sigma?: number; conf: number; reason?: string }
+export interface Detected<T> {
+  value?: T; sigma?: number; conf: number; reason?: string;
+  /** Values of one group share their error: the camera of the frames of one section comes from one fit. */
+  group?: string;
+}
 /** A value Backtrack can detect and the user can override. The user's value always wins. */
 export interface Field<T> { manual?: T; auto?: Detected<T> }
 
@@ -47,6 +51,45 @@ export interface Settings {
 export interface ClipData {
   /** The map the clip comes from: its image under the maps, and its terrain for the solver. */
   map: Field<MapId>;
+  /** The sections the detection ran on (automation plan section 8.1). */
+  sections?: Section[];
+}
+
+/**
+ * A part of a clip where a shell flies, and what the detection found in it (src/lib/vision/pipeline.ts). The
+ * rotations of its frames are the stabilization, kept so the stabilized view and a new run need not repeat it.
+ */
+export interface Section {
+  id: Id; shotId: Id;
+  /** The section (s), and when the detection ran and how long it took (ms). */
+  a: number; b: number; ranAt: number; ms: number;
+  /** The time of each part of the run (ms), for the speed work (src/lib/vision/profile.ts). */
+  profile?: Record<string, number>;
+  width: number; height: number;
+  /** The reference frame (s), and every decoded frame: rotation (b_frame = R b_ref, row-major), inliers, fit (px). */
+  ref: number;
+  frames: { t: number; R: number[] | null; ok: boolean; inliers: number; fitPx: number }[];
+  /** The camera of the reference frame (deg). The user can override it for the whole section. */
+  heading: Field<number>; pitch: Field<number>; roll: Field<number>;
+  /**
+   * The shell marks: in the frame (px as the app counts them, pixel i spans i to i + 1) and in the reference camera
+   * (px as the vision code counts them, pixel centers on whole numbers), with their detection score.
+   */
+  marks: { t: number; x: number; y: number; rx: number; ry: number; score: number }[];
+  /** The vertical lines of the pitch, in the reference camera (px), for the overlay. */
+  lines: [number, number, number, number][];
+  impact: Detected<Impact> & { at?: XY };
+  /** The minimap: the map, where the user stood, and the scale (m per minimap pixel at 2160p). */
+  minimap?: { map: Detected<MapId>; at: Detected<XY>; mpp: number };
+  /**
+   * Where the user was (game units) on frames of the section up to the impact, smoothed, when they walked: each frame
+   * matched on its own. Missing when the user stood still (moved less than a few meters).
+   */
+  walk?: { t: number; x: number; y: number }[];
+  /** Frames of the section without a sighting, and why. */
+  dropped: { t: number; reason: string }[];
+  /** What the user should know: too few sightings, none near the impact, a gap. */
+  notes: string[];
 }
 
 /** A rangefinder reading: where the user stood (game units), a compass heading (deg) and a distance (m). */
@@ -85,7 +128,11 @@ export interface Sighting {
   roll: Field<number>;
   /** The zoom of binoculars or a scope on this frame: the field of view is the game FOV divided by it. 1 without. */
   zoom?: number;
-  sameCameraAsPrevious: boolean;
+  /**
+   * Where the user stood on this frame against where they stood at the impact (m, east and north), from the path of
+   * the minimap: a user who walks. Without it the user stood still during the flight.
+   */
+  walkM?: [number, number];
   /** Left out of the calculation, to test what it changes. */
   excluded?: boolean;
 }
@@ -106,6 +153,8 @@ export interface ProjectData {
 export interface Heights {
   crater: Record<Id, number>; // shotId
   gun: Record<Id, number>; // shotId
+  /** The ground where the user stood (shotId); the height of the crater when missing. */
+  observer?: Record<Id, number>;
 }
 
 /**
@@ -113,7 +162,19 @@ export interface Heights {
  * its clip. The solver finds where the user stood in each clip. `sigma` is the angular error (rad) of the ray: its
  * mark, and the error of its frame time at the speed the shell moves across the image (section 12.5).
  */
-export interface Ray { O: Vec3; D: Vec3; tau: number; clip: Id; sigma?: number }
+export interface Ray {
+  O: Vec3; D: Vec3; tau: number; clip: Id;
+  /** The sighting of the ray. */
+  sighting?: Id;
+  /** The angular error (rad) across the path of the shell: the mark and the camera. */
+  sigma?: number;
+  /**
+   * The direction the shell moves in the image at this ray (unit, across the ray), and the angular error (rad) along
+   * it: the mark, and the error of the frame time at the speed of the shell (section 12.5). A frame time only moves a
+   * mark along the path, so a fast mark keeps what it says across the path.
+   */
+  along?: Vec3; sigmaAlong?: number;
+}
 
 /**
  * Where the user stood in a clip, as a shift (m) from the crater that the solver pulls the fit toward, and its

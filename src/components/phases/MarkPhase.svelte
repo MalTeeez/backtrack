@@ -8,7 +8,7 @@
   import Timeline, { timecode } from '../mark/Timeline.svelte';
   import MarkToolbar from '../mark/MarkToolbar.svelte';
   import SightingList, { allFolded, foldAll } from '../mark/SightingList.svelte';
-  import { markNotes, type Handle, type MarkTarget } from '../mark/draw.ts';
+  import { detectionView, markNotes, type Handle, type MarkTarget } from '../mark/draw.ts';
   import { SightingSolver } from '../../lib/solver/sightings.ts';
   import { shellSpeeds } from '../../lib/solver/motion.ts';
   import { readVideoCompass, readVideoCompassRaw } from '../../lib/video/compassRead.ts';
@@ -16,6 +16,11 @@
   import { addShot, clipInfo, clipMap, clips, clipView, currentShot, fixShot, newSighting, project, sameFrame, shotsOf, sightingAt, ui } from '../../lib/state/project.svelte.ts';
   import { detected, value } from '../../lib/solver/field.ts';
   import MapChooser from '../MapChooser.svelte';
+  import SectionPanel from '../mark/SectionPanel.svelte';
+  import StabView from '../mark/StabView.svelte';
+  import { refToFrame } from '../../lib/vision/rotation.ts';
+  import { focalPx } from '../../lib/solver/camera.ts';
+  import { detectClipMap, detection, stopMapSearch } from '../../lib/state/detect.svelte.ts';
   import { clipFrames, clipUrl } from '../../lib/state/persistence.ts';
   import { frameIndexAt, frameTimeAt, seekTimeFor } from '../../lib/video/frames.ts';
   import type { Id, Pt, Sighting } from '../../lib/solver/types.ts';
@@ -50,23 +55,6 @@
       ? project.sightings.filter((s) => s.clipId === loaded && s.shotId !== shot.id && sameFrame(s.timeS, frameTime))
       : [],
   );
-  // a sighting with the camera of an earlier one: the earlier sighting with its own camera, whose edges it uses
-  const source = $derived.by(() => {
-    if (!sighting?.sameCameraAsPrevious) return null;
-    const s = sighting;
-    return project.sightings
-      .filter((x) => x.clipId === s.clipId && x.timeS < s.timeS && !x.sameCameraAsPrevious && x.edges.length)
-      .sort((a, b) => b.timeS - a.timeS)[0] ?? null;
-  });
-  /** The name of a sighting as the list shows it: its number within its shot, and the shot when it is another one. */
-  function sightingName(x: Sighting) {
-    const order = new Map(clips.list.map((c, i) => [c.id, i]));
-    const list = project.sightings
-      .filter((y) => y.shotId === x.shotId)
-      .sort((a, b) => (a.clipId === b.clipId ? a.timeS - b.timeS : (order.get(a.clipId) ?? 0) - (order.get(b.clipId) ?? 0)));
-    const n = `Sighting ${list.findIndex((y) => y.id === x.id) + 1}`;
-    return x.shotId === shot.id ? n : `${project.shots.find((y) => y.id === x.shotId)?.name ?? 'Other shot'}, ${n.toLowerCase()}`;
-  }
   // any shot lands on this frame
   const impactHere = $derived(!!loaded && project.shots.some((s) => { const i = value(s.impact[loaded!]); return !!i && sameFrame(i.b, frameTime); }));
 
@@ -80,13 +68,7 @@
       return markNotes(s, p, size, project.settings, snap ? solver.aim(snap) : null, snap ? solver.solve(snap) : null, s && speeds.get(s.id));
     };
     const name = (id: Id) => project.shots.find((x) => x.id === id)?.name ?? 'Other shot';
-    // the copied edges: labels without a remove button, which say where they come from
-    const copiedNotes = source
-      ? markNotes({ ...$state.snapshot(source), shell: {} }, null, size, project.settings, null, null).map((n) => ({
-          ...n, fixed: true, from: { short: 'from prev', long: `Copied with the camera of ${sightingName(source)} at ${source.timeS.toFixed(3)} s` },
-        }))
-      : [];
-    return [...of(sighting, pending), ...copiedNotes, ...others.flatMap((o) => of(o, null).map((n) => ({ ...n, title: `${name(o.shotId)}: ${n.title}`, fixed: true })))];
+    return [...of(sighting, pending), ...others.flatMap((o) => of(o, null).map((n) => ({ ...n, title: `${name(o.shotId)}: ${n.title}`, fixed: true })))];
   });
 
   // Recordings have no fixed frame rate. The frame list of the clip (prepareClip.ts) gives the start time of the frame
@@ -359,6 +341,23 @@
     else if (k === 'escape') { ui.tool = null; pending = null; }
   }
 
+  // the map of a clip that has none: found in the background, for the question above the video
+  $effect(() => {
+    if (loaded && project.clips[loaded]?.map.manual == null && !ui.mapAsked[loaded]) untrack(() => detectClipMap(loaded!, duration));
+  });
+
+  // the detection of this shot in this clip, and the vertical lines of its pitch in the frame on screen
+  const shotSection = $derived(loaded ? project.clips[loaded]?.sections?.find((s) => s.shotId === shot.id) : undefined);
+  const guides = $derived.by((): [Pt, Pt][] => {
+    const R = shotSection?.frames.find((f) => sameFrame(f.t, frameTime))?.R;
+    if (!R || !shotSection) return [];
+    const w = video.videoWidth, h = video.videoHeight, st = project.settings;
+    const K = { f: focalPx(w, h, st.fovDeg, st.fovAxis), cx: w / 2 - 0.5, cy: h / 2 - 0.5 };
+    return shotSection.lines.map(([x1, y1, x2, y2]) => [refToFrame(K, R, { x: x1, y: y1 }), refToFrame(K, R, { x: x2, y: y2 })]);
+  });
+  const detectionOverlay = $derived(ui.cv && shotSection && video.videoWidth ? detectionView(shotSection, frameTime, video.videoWidth, video.videoHeight, project.settings) : null);
+  const VIEWS = [['video', 'Video'], ['stab', 'Stabilized'], ['both', 'Both']] as const;
+
   const shotSightings = $derived(project.sightings.filter((s) => s.shotId === shot.id).map((s) => s.id));
   const duration = $derived(clips.list.find((c) => c.id === loaded)?.durationS ?? 0);
 </script>
@@ -382,11 +381,17 @@
           {#if loadError}
             <p class="note bad m-3">{loadError}</p>
           {:else if loaded}
-            <div class="relative h-full">
-              <Viewer {video} {frame} {sighting} {others} copied={source?.edges ?? []} impact={impactHere} {pending} {lock} {notes} tool={!!ui.tool} onpoint={place} onhover={(p) => (hover = p)} ondrag={drag} onmiddle={(p) => (lock = lock ? null : p)} onremove={removeMark} />
+            <div class="relative grid h-full {ui.view === 'both' ? 'grid-cols-2 gap-1' : ''}">
+              <!-- the video stays on the page in every view: a browser stops decoding a video nobody can see -->
+              <div class="relative min-w-0 {ui.view === 'stab' ? 'pointer-events-none absolute inset-0 opacity-0' : ''}">
+                <Viewer {video} {frame} {sighting} {others} copied={guides} impact={impactHere} detection={detectionOverlay} {pending} {lock} {notes} tool={!!ui.tool} onpoint={place} onhover={(p) => (hover = p)} ondrag={drag} onmiddle={(p) => (lock = lock ? null : p)} onremove={removeMark} />
+              </div>
+              {#if ui.view !== 'video'}<div class="relative min-w-0"><StabView {video} {frame} time={frameTime} section={shotSection} /></div>{/if}
               <!-- the map, asked when marking of a clip starts (automation plan section 4) -->
-              {#if !clipMap(loaded) && !ui.mapAsked[loaded]}
-                <MapChooser big value={undefined} auto={project.clips[loaded]?.map.auto} onpick={(m) => (clipInfo(loaded!).map.manual = m)} onskip={() => (ui.mapAsked[loaded!] = true)} />
+              <!-- the question stays until the user picks: the detected map only goes first -->
+              {#if project.clips[loaded]?.map.manual == null && !ui.mapAsked[loaded]}
+                <MapChooser big value={undefined} auto={project.clips[loaded]?.map.auto} searching={detection.running?.clipId === loaded && !detection.running.shotId}
+                  onpick={(m) => { clipInfo(loaded!).map.manual = m; stopMapSearch(loaded!); }} onskip={() => { ui.mapAsked[loaded!] = true; stopMapSearch(loaded!); }} />
               {/if}
             </div>
           {:else}
@@ -398,6 +403,10 @@
             <div class="flex flex-wrap gap-px" role="group" aria-label="Playback speed">
               {#each SPEEDS as sp}<button class="option min-h-0 px-1.5 py-1 text-[11px]" aria-pressed={ui.speed === sp} onclick={() => (ui.speed = sp)} title="Play at {sp}x speed">{sp}x</button>{/each}
             </div>
+            <div class="flex gap-px" role="group" aria-label="View" title="The video, or the stabilized view of the detection: the frames turned into its reference camera">
+              {#each VIEWS as [v, label]}<button class="option min-h-0 px-1.5 py-1 text-[11px]" aria-pressed={ui.view === v} onclick={() => (ui.view = v)} data-testid="view-{v}">{label}</button>{/each}
+            </div>
+            {#if shotSection}<button class="option min-h-0 px-1.5 py-1 text-[11px]" aria-pressed={ui.cv} onclick={() => (ui.cv = !ui.cv)} data-testid="view-cv" title="On the video: the horizon and headings of the detected camera, the shell track of the section, the impact, the HUD parts the detection reads, and how sure the rotation of this frame is">Detection</button>{/if}
             {#if sighting}<span class="tag accent">Sighting on this frame</span>{/if}
           </div>
           <!-- each button with its key caps under it -->
@@ -461,6 +470,12 @@
           onnudge={nudgeLens} bind:zoom={ui.magZoom}
         />
       </section>
+      {#if loaded}
+        <section class="card shrink-0">
+          <header class="card-head min-h-0 py-1.5"><h2 class="card-title text-[11px]" title="Backtrack finds the shell, the camera, the impact and where you stood in the section of the timeline">Detection of {shot.name}</h2></header>
+          <div class="card-body p-2"><SectionPanel clipId={loaded} loop={section} ongo={(t) => { video.pause(); go(loaded!, t); }} /></div>
+        </section>
+      {/if}
       <section class="card flex min-h-[260px] flex-1 flex-col">
         <header class="card-head gap-2">
           <h2 class="card-title">Sightings</h2>

@@ -3,7 +3,7 @@
    * Picks a crater on a map in game coordinates: the downloaded map image when there is one, a grid, and the crater
    * with a ring every 500 m of the weapon range and the suspected heading. The wheel zooms, a drag pans, and a click
    * sets the crater X and Y. With `onpick`, a click picks another point instead (where the user stood for a sighting),
-   * which the map shows as `observer`.
+   * which the map shows as `observer`, with the walk of the detection when the user walked.
    */
   import { compassRose, css } from './mark/draw.ts';
   import { drawTiles, mapInfo } from '../lib/map/tiles.svelte.ts';
@@ -16,10 +16,12 @@
   import MapChooser from './MapChooser.svelte';
   import { craterGame } from '../lib/solver/sightings.ts';
 
-  let { viewId, shot, reachM, onpick, observer }: {
+  let { viewId, shot, reachM, onpick, observer, solved }: {
     /** Where the view is kept (ui.mapViews): the shot for the crater, the shot and "obs" for where the user stood. */
     viewId: Id; shot: Shot; reachM: number;
     onpick?: (p: { x: number; y: number }) => void; observer?: { x?: number; y?: number } | null;
+    /** The crater the solver found from where the user stood (automation plan section 11), drawn as a ring. */
+    solved?: { x: number; y: number };
   } = $props();
   // the map of the clip of the shot, unless this panel shows another one (automation plan section 4)
   const clipMapId = $derived(clipMap(shot.clipId));
@@ -55,7 +57,7 @@
 
   // the view: center and span (game units across the shorter side). It starts on the crater, wide enough for the
   // weapon range, and the wheel and drags change it.
-  const fit = () => ({ cx: seen?.x ?? crater?.x ?? 80, cy: seen?.y ?? crater?.y ?? 80, span: onpick ? 6 : (reachM * 2.2) / 100 || 30 });
+  const fit = () => ({ cx: seen?.x ?? crater?.x ?? solved?.x ?? 80, cy: seen?.y ?? crater?.y ?? solved?.y ?? 80, span: onpick ? 6 : (reachM * 2.2) / 100 || 30 });
   // the map opens where the user left it
   let view = $state(untrack(() => ui.mapViews[viewId] || fit()));
   $effect(() => { ui.mapViews[viewId] = { ...view }; });
@@ -99,6 +101,20 @@
       compassRose(g, px, py, 60);
       g.fillStyle = css('--impact'); g.strokeStyle = '#000'; g.lineWidth = 1.5;
       g.beginPath(); g.arc(px, py, 6, 0, 7); g.fill(); g.stroke();
+    }
+    if (solved && !crater) {
+      // the crater the solver found: a ring, until the user gives one
+      const [px, py] = toPx(solved.x, solved.y);
+      g.strokeStyle = css('--impact'); g.lineWidth = 2.5;
+      g.beginPath(); g.arc(px, py, 7, 0, 7); g.stroke();
+    }
+    // the walk the detection found from the minimap of each frame, to where the user was at the impact
+    const walk = shot.clipId ? project.clips[shot.clipId]?.sections?.find((x) => x.shotId === shot.id)?.walk : undefined;
+    if (walk) {
+      const pts = walk.map((p) => toPx(p.x, p.y)), path = () => { g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke(); };
+      g.lineCap = 'round'; g.lineJoin = 'round';
+      g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 4; path();
+      g.strokeStyle = css('--accent'); g.lineWidth = 2; path();
     }
     if (seen) {
       // where the user stood: a triangle, as on the result map

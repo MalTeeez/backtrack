@@ -119,7 +119,9 @@ export function motionFlags(data: ProjectData, solver = new SightingSolver(data)
         // the marks and the typed headings are not exact: a step only counts when it is off by more than they allow
         const degPerPx = R2D / (focalPx(x.q.frameW, x.q.frameH, st.fovDeg, st.fovAxis) * (x.q.zoom ?? 1));
         // the step and the neighbors that predict it both carry that error, so the slack is 5 of them
-        const slack = x.q.sameCameraAsPrevious ? 5 * st.markSigmaPx * degPerPx * Math.SQRT2 : 5 * st.compassSigmaDeg * Math.SQRT2;
+        // with the camera of one stabilized section, only the marks err from frame to frame; else the headings too
+        const shared = !!x.q.heading.auto?.group && x.q.heading.manual == null && x.q.heading.auto.group === x.p.heading.auto?.group;
+        const slack = shared ? 5 * st.markSigmaPx * degPerPx * Math.SQRT2 : 5 * st.compassSigmaDeg * Math.SQRT2;
         if ((ratio > RATIO || ratio < 1 / RATIO) && Math.abs(x.deg - expected * x.dt) > slack) {
           found.set(j, { shotId: x.shotId, from: x.p.id, to: x.q.id, t0: x.p.timeS, t1: x.q.timeS, ratio });
         }

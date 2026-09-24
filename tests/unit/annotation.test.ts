@@ -8,7 +8,7 @@ const tr = makeScene();
 const clip: ClipMeta = { id: 'clip', name: 'Clip 1 (17 s)', source: 'buffer', durationS: tr.duration, width: tr.W, height: tr.H, createdAt: 0 };
 let n = 0;
 const make = { uid: () => `new${n++}`, shot: (k: number): Shot => ({ id: `shot${k}`, name: `Shot ${k}`, crater: {}, impact: {}, observer: {} }) };
-const empty = (): ProjectData => ({ settings: { ...sceneProject(tr, { n: 1 }).settings, fovDeg: 70 }, clips: {}, shots: [make.shot(1)], sightings: [] });
+const empty = (): ProjectData => ({ settings: { ...sceneProject(tr, { n: 1 }).settings }, clips: {}, shots: [make.shot(1)], sightings: [] });
 
 describe('annotation files', () => {
   test('a clip exports and imports back into an empty project unchanged', () => {
@@ -22,7 +22,6 @@ describe('annotation files', () => {
     const dst = empty();
     const notes = applyAnnotation(dst, 'imported', a, make, clip);
     expect(notes).toEqual([]);
-    // an empty project takes the settings of the file
     expect(dst.settings.fovDeg).toBe(src.settings.fovDeg);
     expect(dst.shots).toHaveLength(1);
     expect(dst.shots[0].crater).toEqual(src.shots[0].crater);
@@ -37,12 +36,14 @@ describe('annotation files', () => {
     expect(annotation({ ...empty(), shots: [] }, clip)).toBeNull();
   });
 
-  test('a project with sightings keeps its FOV and says so', () => {
-    const dst = sceneProject(tr, { n: 2 });
-    dst.settings.fovDeg = 70;
-    const notes = applyAnnotation(dst, 'other', annotation(sceneProject(tr, { n: 2 }), clip)!, make, clip);
-    expect(dst.settings.fovDeg).toBe(70);
-    expect(notes[0]).toContain('The project keeps 70 deg');
+  test('the FOV stays the one of the settings, and a file with another one earns a note', () => {
+    // with sightings or without: the file does not change the FOV
+    for (const dst of [sceneProject(tr, { n: 2 }), empty()]) {
+      dst.settings.fovDeg = 70;
+      const notes = applyAnnotation(dst, 'other', annotation(sceneProject(tr, { n: 2 }), clip)!, make, clip);
+      expect(dst.settings.fovDeg).toBe(70);
+      expect(notes[0]).toContain('The settings say 70 deg');
+    }
   });
 
   test('the suspected heading travels with the crater', () => {

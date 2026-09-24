@@ -19,6 +19,8 @@ export interface SceneOptions {
   ground?: (x: number, y: number) => number;
   /** Seconds of video before the shot and after the impact. */
   lead?: number; tail?: number;
+  /** The observer walks at this velocity (m/s, east and north); O is where they stand at the impact. */
+  walk?: [number, number];
 }
 
 export interface Truth {
@@ -32,6 +34,8 @@ export interface Truth {
   edges: [Pt, Pt][];
   craterPx: Pt;
   shellAt: (t: number) => Vec3 | null;
+  /** Where the observer stands at time t (eye height): O at the impact, moving with the walk. */
+  observerAt: (t: number) => Vec3;
 }
 
 /** Per weapon: range to the crater, how far from the crater the observer stands (to the side), and the camera pitch. */
@@ -95,6 +99,7 @@ export function makeScene(o: SceneOptions = {}): Truth {
     weapon, W, H, fovDeg, fps, f, G, C, O, dirDeg, camH, camP, T,
     fireTime, impactTime: fireTime + T, duration: fireTime + T + tail,
     edges, craterPx: proj(C),
+    observerAt: (t) => [O[0] + (o.walk?.[0] ?? 0) * (t - fireTime - T), O[1] + (o.walk?.[1] ?? 0) * (t - fireTime - T), O[2]],
     shellAt: (t) => {
       const tt = t - fireTime;
       if (tt < 0 || tt > T) return null;
@@ -106,7 +111,7 @@ export function makeScene(o: SceneOptions = {}): Truth {
 
 export const shellPx = (tr: Truth, t: number): Pt | null => {
   const P = tr.shellAt(t);
-  return P ? project(P, tr.O, tr.W, tr.H, tr.f, tr.camH, tr.camP) : null;
+  return P ? project(P, tr.observerAt(t), tr.W, tr.H, tr.f, tr.camH, tr.camP) : null;
 };
 
 /** What one frame shows: the shell, the edges and (after impact) the flash. */

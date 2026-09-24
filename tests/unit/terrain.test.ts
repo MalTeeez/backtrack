@@ -62,6 +62,19 @@ describe('terrain heights', () => {
     expect(dist(solveProject(data, seeded(1), 0).shots[0].gun)).toBeGreaterThan(20);
   });
 
+  test('a user on a roof: the ground where the minimap puts the user sets the rays, not the crater', async () => {
+    // a 15 m block under the user, 40 m from the crater
+    const O0 = makeScene().O, roof = (x: number, y: number) => (Math.hypot(x - O0[0], y - O0[1]) < 15 ? 15 : 0);
+    const tr = makeScene({ ground: roof }), data = sceneProject(tr, { n: 15 });
+    // a small roof needs the minimap position: from the crater height, the solve puts the user 40 m off the block
+    data.shots[0].observer.clip = { manual: { x: tr.O[0] / 100, y: tr.O[1] / 100 } };
+    const h = (await terrainHeights(async (x, y) => roof(x * 100, y * 100), data, (hh) => solveProject(data, seeded(1), 0, hh)))!;
+    expect(h.observer!.shot).toBe(15);
+    const d = (hh?: typeof h) => { const g = solveProject(data, seeded(1), 0, hh).shots[0].gun!; return Math.hypot(g.x - tr.G[0], g.y - tr.G[1]); };
+    expect(d(h)).toBeLessThan(2);
+    expect(d({ ...h, observer: undefined })).toBeGreaterThan(2 * d(h));
+  });
+
   test('a position outside the terrain data means flat ground', async () => {
     expect(await terrainHeights(async () => null, data, (hh) => solveProject(data, seeded(1), 0, hh))).toBeNull();
   });

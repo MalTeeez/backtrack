@@ -30,11 +30,17 @@ export function randn(rng: Rng): number {
  * the accuracy of the settings, and an impact time error (one draw per clip, anywhere in the impact interval).
  */
 export function makeJitter(st: Settings, rng: Rng): Jitter {
-  const impacts = new Map<Id, number>();
+  const impacts = new Map<Id, number>(), groups = new Map<string, number>();
+  // one standard normal draw per group, so values of one fit move together
+  const shared = (group: string | undefined) => {
+    if (!group) return randn(rng);
+    if (!groups.has(group)) groups.set(group, randn(rng));
+    return groups.get(group)!;
+  };
   return {
     px: (sigma = st.markSigmaPx) => randn(rng) * sigma,
-    heading: (sigma = st.compassSigmaDeg) => randn(rng) * sigma,
-    angle: (sigma) => randn(rng) * sigma,
+    heading: (sigma = st.compassSigmaDeg, group) => shared(group) * sigma,
+    angle: (sigma, group) => shared(group) * sigma,
     impact: (clipId, half) => {
       if (!impacts.has(clipId)) impacts.set(clipId, half > 0 ? (2 * rng() - 1) * half : randn(rng) * IMPACT_SIGMA_S);
       return impacts.get(clipId)!;

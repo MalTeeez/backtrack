@@ -1,6 +1,6 @@
 <script lang="ts">
   import logo from './assets/logo.svg';
-  import { ArrowRight, Check, Columns2, Monitor, Moon, Redo2, Sun, TriangleAlert, Undo2 } from '@lucide/svelte';
+  import { ArrowRight, Check, Columns2, Monitor, Moon, Redo2, Settings, Sun, TriangleAlert, Undo2 } from '@lucide/svelte';
   import { history, record, redo, undo } from './lib/state/history.svelte.ts';
   import Spinner from './components/Spinner.svelte';
   import RecordPhase from './components/phases/RecordPhase.svelte';
@@ -11,6 +11,8 @@
   import { listClips, loadSaved, save } from './lib/state/persistence.ts';
   import { DATA_VERSION, clipData, clipInfo, clipMap, clips, fixShot, loadProject, project, ui, type Phase } from './lib/state/project.svelte.ts';
   import MapChooser from './components/MapChooser.svelte';
+  import SettingsDialog, { openSettings } from './components/SettingsDialog.svelte';
+  import { prefs } from './lib/state/prefs.svelte.ts';
   import { cycleTheme, theme } from './lib/state/theme.svelte.ts';
 
   const PHASES: [Phase, string][] = [
@@ -69,6 +71,15 @@
     .catch((e) => (loadError = `The app could not read the saved data (${e?.message ?? e}). It will not keep changes.`))
     .finally(() => (ready = true));
 
+  // the project takes the FOV of the user's settings: the solver and the annotation files read it from there. It
+  // also reads the project's value, so an undo that brings back an old FOV is put right again.
+  $effect(() => {
+    if (!ready) return;
+    const st = project.settings;
+    if (st.fovDeg !== prefs.fovDeg) st.fovDeg = prefs.fovDeg;
+    if (st.fovAxis !== prefs.fovAxis) st.fovAxis = prefs.fovAxis;
+  });
+
   // every change of the project goes into the undo history, from the saved project on
   $effect(() => {
     const data = $state.snapshot(project);
@@ -104,6 +115,7 @@
 </script>
 
 <svelte:window {onkeydown} />
+<SettingsDialog />
 
 <div class="flex h-dvh flex-col gap-2 p-2">
   <header class="navbar shrink-0">
@@ -139,6 +151,11 @@
           <span class="w-28"><MapChooser value={clipMap(id)} auto={project.clips[id]?.map.auto} onpick={(m) => (clipInfo(id).map.manual = m)} /></span>
         </label>
       {/if}
+      <!-- the settings of the user: the FOV of the game, which the detection needs before any mark -->
+      <button class="btn sm {prefs.saved ? '' : 'text-warn'}" onclick={openSettings} data-testid="settings"
+        title={prefs.saved ? `Settings: the game FOV is ${prefs.fovDeg} deg (${prefs.fovAxis === 'h' ? 'horizontal' : 'vertical'})` : 'Set the FOV of the game: every angle depends on it'}>
+        <Settings size={13} /> FOV {prefs.fovDeg}{prefs.saved ? '' : '?'}
+      </button>
         <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{clips.list.length}</span><span class="label">{clips.list.length == 1 ? "clip" : "clips"}</span></span>
         <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{clipView.sightings.length}</span><span class="label">{clipView.sightings.length == 1 ? "sighting" : "sightings"}</span></span>
         <span class="flex items-baseline gap-1.5"><span class="num text-[14px] text-text">{clipView.shots.length}</span><span class="label">{clipView.shots.length == 1 ? "shot" : "shots"}</span></span>

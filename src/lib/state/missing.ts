@@ -8,15 +8,12 @@ import { motionFlags, motionShotWarning } from '../solver/motion.ts';
 import { NEEDED } from '../solver/solve.ts';
 import type { ClipMeta, ProjectData, Sighting } from '../solver/types.ts';
 
-/**
- * What a sighting still lacks: the shell, and its own camera data unless it copies the previous camera. A confident
- * automatic value counts (field.ts).
- */
+/** What a sighting still lacks: the shell, a pitch (or vertical edges) and a heading. A confident automatic value counts. */
 export function lacks(s: Sighting): string[] {
   const out: string[] = [];
   if (!value(s.shell)) out.push('shell');
-  if (!s.sameCameraAsPrevious && !s.edges.length && value(s.pitch) == null) out.push('vertical edge');
-  if (!s.sameCameraAsPrevious && value(s.heading) == null) out.push('compass heading');
+  if (!s.edges.length && value(s.pitch) == null) out.push('vertical edge');
+  if (value(s.heading) == null) out.push('compass heading');
   return out;
 }
 

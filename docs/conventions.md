@@ -45,7 +45,9 @@ src/lib/solver/        TypeScript without DOM access: camera, ballistics, solve,
 src/lib/capture/       rollingRecorder, importClip, clipFiles (video and .backtrack.json download and import)
 src/lib/video/         frameStepper, webmDuration
 src/lib/state/         project.svelte.ts (runes), persistence.ts (IndexedDB with idb), missing.ts, theme.svelte.ts
-src/lib/workers/       solver.worker.ts
+src/lib/workers/       solver.worker.ts, detect.worker.ts (the detection), vision.worker.ts (its pool)
+src/lib/vision/        the automatic detection: decode, stabilize, lines, heading, shell, gpu, impact, minimap,
+                       pipeline, pool, profile
 src/components/        shared pieces (NumInput, Info)
 src/components/phases/ RecordPhase, MarkPhase, CoordinatesPhase, ResultPhase
 src/components/mark/   Viewer, Magnifier, Timeline, MarkToolbar, SightingList, draw.ts
@@ -130,8 +132,8 @@ read `deg` and `+/-` instead of the symbols. `plan.md` and `poc/` keep their ori
 
 ## Camera and minimum sightings
 
-The app has no landmarks. Each sighting gets its camera from vertical edges (pitch) and the typed compass heading
-(heading), or copies the camera of an earlier sighting.
+The app has no landmarks. Each sighting gets its camera from the detection of its section (automatic heading, pitch
+and roll), from vertical edges (pitch) and the compass heading, or from values the user types.
 
 ## Positions, heights and time
 
@@ -147,11 +149,15 @@ The app has no landmarks. Each sighting gets its camera from vertical edges (pit
 - **Position.** Where the user stood during the flight of a shot comes from the minimap (`observer`, a field per
   clip; typed or picked on a map in Coordinates). Every ray starts at eye height above the crater, and for each
   candidate flight `observerShift` (`src/lib/solver/ballisticFit.ts`) finds the ground shift of the user in each
-  clip by weighted least squares, each ray with its angular error times its distance. The minimap position is not
+  clip by least squares on the misses in meters, every ray alike, and less along the path of the shell where its
+  frame time error moves it (a weight per ray by its own miss in meters trusted the near rays too much: the gun error
+  of the benchmark with 30 ms frame time errors went from 13 to 48 m). The minimap position is not
   fixed: it pulls the shift toward itself with its error (10 m for a typed position, or the sigma of the automatic
   one) plus the error of the crater, and a solved spot more than 3 of those and 10 m away gets a note. A 30 m shift
   that the solver ignored would move an L52 gun by about 100 m. With the shift, exact data gives the gun within 2 m.
-  The app assumes that the user did not move during the flight.
+  A user who walks during the flight: the detection gives each sighting its offset from where the user was at the
+  impact (`walkM`, from the minimap of each frame, see Automatic detection), and each ray starts there. The shift
+  is then where the user was at the impact.
 - **Crater.** The user gives each crater as X and Y, typed or clicked on a map of game coordinates
   (`CraterMap.svelte`), or as a rangefinder reading: where the user stood then, the compass heading and the distance
   as the game shows it (`craterGame` in `src/lib/solver/sightings.ts`). Without a crater, where the user stood is
@@ -244,8 +250,13 @@ The app has no landmarks. Each sighting gets its camera from vertical edges (pit
   skipped frame) cannot pull the flight toward itself. On synthetic data with mark and compass errors it is as
   accurate as squares; on the test clip it moved the gun of shot 1 from 88.6, 47.7 to 92.9, 46.7 with all sightings,
   next to the 93.8, 45.6 of shot 2, so the two shots now make one gun. The reported fit error stays the RMS.
-  Each miss counts in units of the error of its ray (automation plan section 12.5): its mark error, and a frame time
-  error of 5 ms (`TIMESTAMP_SIGMA_S`) times the speed of the shell across the image, against the median ray.
+  Each miss counts in units of the error of its ray (automation plan section 12.5), against the median ray, split
+  into the part across the path of the shell (the mark and the camera) and the part along it (also the frame time
+  error times the speed of the shell in the image): a frame time moves a mark only along the path. The frame time
+  error of each clip comes from its marks (`frameTiming` in `result.ts`): the jitter of each mark along the path
+  against a quadratic through its 6 neighbors, over the speed, for marks faster than 3 deg/s, as a robust sigma
+  (3 to 80 ms; 15 ms, `TIMESTAMP_SIGMA_S`, when a clip has too few). On synthetic runs it reads 13 to 20 ms for a
+  true 10 ms and 25 to 62 ms for 30 ms, which is close enough for a weight.
 - **Fit error.** The result shows the RMS miss of the rays in meters and in degrees. The "fit error is high" note only
   counts the angle beyond what a 10 m miss explains (`MODEL_M` in `ballisticFit.ts`): the shell is only 30 to 200 m
   away in the last frames, so a few meters of position or model error are several degrees there. On the test clip
@@ -255,7 +266,11 @@ The app has no landmarks. Each sighting gets its camera from vertical edges (pit
   for what is missing or wrong, and values show as label and value fields.
 - **Heights.** The user enters no heights. With a map picked, the solver worker takes the ground heights of the
   craters and the guns from the terrain (`src/lib/terrain/`, `docs/terrain-plan.md`). Without a map,
-  or outside the terrain data, the ground is flat at height 0. The camera sits `EYE_HEIGHT_M` (1.7 m) above the crater.
+  or outside the terrain data, the ground is flat at height 0. The camera sits `EYE_HEIGHT_M` (1.7 m) above the
+  ground where the user stood: at the minimap position, or at the solved spot, refined over the rounds like the gun
+  (`terrainHeights`). A user on a 15 m roof taken at the height of the crater put the gun 20 m off on synthetic data.
+  Without a minimap position a small roof is not found: at the crater height the solve puts the user 40 m off it.
+  The eye height is not solved: the rays hardly tell it apart from the flight.
 - **Time.** Recordings have no fixed frame rate. On import, `prepareClip` (`src/lib/video/prepareClip.ts`, with
   mediabunny) lists the presentation time of every frame, and remuxes WebM files so they carry a seek index and a
   duration. Without the index, Firefox reports a wrong duration and stalls about 2 s before playing after a seek.
@@ -263,6 +278,112 @@ The app has no landmarks. Each sighting gets its camera from vertical edges (pit
   The solver works with these times, never with frame counts. The timeline shows one thumbnail per 2 s of video.
 - **Video.** The Mark phase shows the <video> element itself, with the marks on a transparent canvas above it.
   Chrome stops decoding a playing video that is not on the page.
+
+## Automatic detection
+
+`docs/automation-plan.md` is the specification; this section records how the app does it and what the test clips
+gave. The user selects where a shell flies on the ruler of the timeline and presses Detect (D). The detection worker
+(`src/lib/workers/detect.worker.ts`) decodes the frames from half a second before the section to 1.2 s after it
+(`src/lib/vision/decode.ts`, mediabunny and WebCodecs), runs `detectSection` (`src/lib/vision/pipeline.ts`) and
+answers with a `Section`. `applySection` (`src/lib/state/sections.ts`) writes it into the project: a sighting per
+shell mark with automatic fields, the camera of every sighting of the shot in the section (the reference camera
+turned by the rotation of the frame, with the section as the error group of the Monte Carlo runs), the impact, where
+the user stood and the map. A new run keeps what the user did and drops the automatic sightings it no longer finds.
+The Mark phase shows the section in the Detection card (its camera can be overridden there for all frames at once),
+the section and its left-out frames in the lane of the shot, and the stabilized view (Video, Stabilized, Both: a
+WebGL warp of the video into the reference camera with the shell track, the pitch lines and the impact point). The
+pitch lines also show dashed in the video.
+
+- **Frames.** The gray of a frame is the luma of the video in full range: the Y plane where the decoder gives I420
+  (Chrome), else the RGB of the browser (Firefox gives BGRX) with the luma weights of the color matrix of the video
+  (BT.709 for the test clips), which gives the same Y back. With the BT.601 weights, Firefox lost the far part of a
+  shell track. The compass and minimap crops go through a canvas, as `compassRead.ts` does.
+- **Stabilization** (`stabilize.ts`). OpenCV.js has no SIFT, so ORB (4000 features at half size) finds the matches,
+  a RANSAC over rotations finds up to three models, and the world is the model highest in the frame among those with
+  at least 30 percent of the matches (the prototype rule; "closest to the neighbor frame" picked the hands during a
+  fast turn). Lucas-Kanade moves the world points to subpixel positions for the final fit. HUD points (still in frames
+  where the world turns) leave the features for a second pass. A frame with fewer than 150 direct inliers also chains
+  through its nearest good neighbor. A frame is good with 50 inliers and a rotation known to 0.1 px (fit over the root
+  of the inliers): the 1 px fit error of the plan dropped good 4K frames of 300 inliers and 1.2 px. The reference is
+  the frame of the section (not of the frames around it) with the most features. Results: clip 2 static at a fit of
+  0.1 px; clip 1 shot 2 up to 0.9 deg during the flight at 0.5 to 0.7 px; clip 1 shot 1 the 17.6 deg tilt before the
+  flight, static during it.
+- **Pitch and roll** (`lines.ts`). OpenCV.js has no LSD. The peaks of the horizontal gradient at half size link from
+  row to row into near-vertical chains (a line detector for vertical lines only), and each chain is refined at full
+  size from the subpixel gradient peaks along it. The game camera does not roll: the fit without roll (each line gives
+  a pitch, tan p = n_y / n_z, and the pitch most line length agrees with wins) comes first, and the fit with a roll
+  only wins with 30 percent more line length. With a free roll, crane arms and train sides pulled clip 2 to 17.9 deg
+  and 1 deg of roll. Results: clip 2 16.73 +/-0.02 deg (plan 16.45, user edges 15.89); clip 1 shot 2 24.00 +/-0.07
+  (plan 24.77, user edges 23.65 to 24.31); clip 1 shot 1 20.90 +/-0.33, too unsure to count, as the plan expects.
+- **Heading** (`heading.ts`). The compass readings of all frames with a good camera, each with the yaw of its frame,
+  give intervals for the reference heading; the band most readings cover wins. The game truncates the heading
+  (`ROUNDING`): the label strip reads 0.27 to 0.29 deg above the truncated fusion on clip 2 and clip 1 shot 2, and
+  0.77 to 0.79 above the rounded one. Clip 1 shot 2 196.63 +/-0.06 deg; clip 1 shot 1 136.74 +/-0.09; clip 2
+  208.50 +/-0.29 (one display value in the whole section, so 53 percent sure).
+- **Shell** (`shell.ts`, `gpu.ts`). A.3 at full size: the median background of all warped frames, the dark blobs
+  with the penalties for large moving areas and texture, candidates with a subpixel peak, linking frame by frame.
+  Changes to A.3: HUD and screen overlays (an FPS counter) that stand still while the camera turns are masked (they
+  move in the warp); candidates within 12 px of a point of the viewmodel model of the stabilization drop out; a step
+  of less than 4 px has no direction, and a short step gets room for its half pixel of position error (whole pixels
+  broke the track in Firefox); the first and last two steps of a track are checked against the speed trend of their
+  neighbors, and the marks past a jump stay in the track (for the impact) but give no sighting ("the frame time is
+  probably off", the plan's dropped frames); a faint mark (score below 15) and a frame without a good camera give no
+  sighting either. The marks are stored in the pixels of the app (centers at .5). Results against the user's marks:
+  clip 2 13 marks, 0.8 px mean; clip 1 shot 2 22 marks, 1.0 px; clip 1 shot 1 7 marks, 5 of 7 within 5 px (the frame
+  timing problem). A search at half size was 4 times faster but lost the far shell of clip 1 shot 2.
+- **Impact** (`impact.ts`). From the track, not the crater (the crater is often hidden): a parabola through the last
+  three marks, and the first frame after the last mark in which more than 5 percent of a square of +/-250 px (2160p)
+  around that path changed by more than 25 gray values, with the frame before it below 2 percent. Clip 1 shot 1
+  39.977 to 40.064 s and shot 2 26.026 to 26.112 s (both as the plan); clip 2 lands out of view, so the impact is
+  required there.
+- **Minimap** (`minimap.ts`). As A.6, with the measured zoom levels (`MINIMAP_LEVELS`: Bakurani 0.196, 0.349, 0.782 and
+  2.64 m/px from `recording-test-clips/minimap/`, Ozeti 0.505 from clip 1): every map at zoom 4 over the levels, a
+  wide range when none matches (not when a clip opens), then zoom 6 near the best. An earlier position of the clip is
+  searched first. Clip 2 Bakurani 79.86, 72.99 (0.78 m/px); clip 1 Ozeti 97.48, 65.69 and 97.28, 65.60. When a clip
+  without a map opens, the worker looks at half a second from its middle and the question for the map shows the
+  result first; the question stays until the user answers.
+- **Walking** (`walkPath` in `pipeline.ts`). After the minimap search, up to 16 frames from the section to the impact
+  each match their own minimap at the found scale near the found spot (zoom 6, with a subpixel peak), matches that
+  stand out less than 2 times are dropped, and a quadratic in time per axis (`smoothPath`, twice, without matches
+  3 robust sigmas off) gives the path. A user who moved less than 3 m stood still; otherwise the section keeps the
+  path (`walk`), the position becomes the one at the impact, and each sighting gets its offset (`walkM`). The three
+  test sections read within 0.3 m of standing; in clip 2 the minimap of one frame does not stand out (1.1 times), so
+  it counts as standing. The stabilization models a pure rotation: a walk moves near features (parallax), and 4 m
+  moves a feature 500 m away by 0.5 deg against the reference. The model of the highest features and the chains of
+  neighbor frames (a few centimeters apart) should carry a slow walk, but no walking clip has checked this or the path.
+- **Pictures.** The video in Mark has a Detection overlay (`detectionView` and `drawDetection` in `draw.ts`): the
+  horizon of the frame camera with a tick per degree of heading (to hold against the compass of the game), the shell
+  track of the section and the impact turned into the frame, the compass and minimap boxes the detection reads with
+  what it found, and the rotation of the frame (matches, fit) with what became of its shell mark. The result map has a
+  Sightings layer: the line of sight of each sighting from where the user was on its frame to the shell on the fitted
+  flight, colored by its miss, the walk, and the minimap position (a hollow triangle). Each shot result charts the miss
+  of each sighting along the path of the shell and across it over the time before the impact (`MissChart.svelte`,
+  from `ShotResult.sightings`), with the frame time error of the clip: misses along the path that swing together
+  mean frame times, a single one far out a bad mark. The Coordinates map shows the walk too.
+- **Speed** (plan section 14). The work per frame runs on a pool of workers (`pool.ts`, one per spare core, each
+  with its own OpenCV): features, the rotation against the reference, the chains, compass readings, minimap scales,
+  and the shell in bands of rows when there is no GPU. With WebGPU the shell runs in compute shaders that follow
+  OpenCV (kernel sizes, borders, block means, upsampling); the GPU and the CPU give the same marks on all three test
+  shots, in Chrome and in Firefox. `profile.ts` times every part. A section of about 50 4K frames: 36.6 s on one
+  thread at first, 8.3 s now with the GPU (11 s on the CPU pool), of which about 3 s find the map when none is known.
+  OpenCV is one file of the build that each worker fetches; the page never loads it.
+- **FOV.** The FOV of the game is a setting of the user, not of a project (`src/lib/state/prefs.svelte.ts`, kept in
+  localStorage): the Settings dialog (the FOV button in the header, a modal `<dialog>`) sets it once for every
+  project, and the header marks it with a "?" until then. The project copies it (App.svelte), so the solver and the
+  annotation files still carry it; an imported file with another FOV earns a note and changes nothing. The detection
+  needs it before any mark: with 90 deg instead of 100, the stabilization of clip 1 shot 2 failed (a pure rotation does
+  not fit a wrong focal length). An estimate of the FOV from the turns of the camera depended on the FOV it started
+  from, so the app has none.
+- **Checks.** `node scripts/vision/run.ts "<clip in test-data>" <a> <b> sec=<a>,<b> [map=] [fov=] [gpu=0] [pool=0]
+  [pitch=] [v=1] [probe=x,y,r]` runs the pipeline in headless Chromium (the full build, which has WebGPU; `BROWSER=
+  firefox` for Firefox) on the dev server, and prints the results, the profile, the marks against the user's, and
+  the solve with the crater of the annotation file. `node scripts/vision/app-check.ts` does it through the app.
+  `tests/e2e/detect.spec.ts` runs the detection on clip 1 in both browsers (on the CPU: the headless browsers of the
+  tests have no WebGPU).
+- **Independent model** (`independent.ts`, section 12.6). A straight flight with gravity over the last second, fitted
+  with Levenberg-Marquardt from 4 start distances, gives a second direction in the result: clip 2 176.3 deg against
+  175.2 of the solver (plan 176 to 177), clip 1 shot 2 188.9 against 190.4. The result also shows how far the solved
+  spot of the user lies from the minimap position (section 13): 21 m on clip 1 shot 2.
 
 ## Weapon ballistics
 

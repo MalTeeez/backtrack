@@ -43,7 +43,6 @@
   const needsCoords = forLater;
   const CAMERA = {
     edges: 'The pitch from the marked edges', auto: 'The pitch found by Backtrack', typed: 'The pitch you typed',
-    copied: 'Copied from an earlier sighting in this clip',
   };
   const deg = (v: number) => `${v.toFixed(2)} deg`;
 </script>
@@ -98,10 +97,9 @@
         <dt>Elevation</dt><dd class="num">{a.ok ? deg(a.el) : '-'}</dd>
         <dt>Shell speed</dt><dd class="num" title="How fast the shell moves as seen by the camera, since the sighting before this one">{speeds.has(s.id) ? `${speeds.get(s.id)!.toFixed(2)} deg/s` : '-'}</dd>
         {#if a.ok}
-          <dt>Camera</dt><dd class="num" title={CAMERA[a.cam.source]}>heading {deg(a.cam.h)}, pitch {deg(a.cam.p)}{a.cam.r ? `, roll ${deg(a.cam.r)}` : ''}{a.cam.source === 'copied' ? ' (copied)' : a.cam.source === 'edges' ? ' (edges)' : ''}</dd>
+          <dt>Camera</dt><dd class="num" title={CAMERA[a.cam.source]}>heading {deg(a.cam.h)}, pitch {deg(a.cam.p)}{a.cam.r ? `, roll ${deg(a.cam.r)}` : ''}{a.cam.source === 'edges' ? ' (edges)' : a.cam.source === 'auto' ? ' (auto)' : ''}</dd>
         {/if}
       </dl>
-      {#if !s.sameCameraAsPrevious}
         <div class="mt-1.5 grid grid-cols-[minmax(0,1fr)_5.5rem] items-start gap-1.5">
           <span title="The compass heading of the game at this frame. A new sighting reads it from the compass in the frame.">
             <AutoNum label="Compass heading" unit="deg" kind="heading" step={0.5} bind:field={s.heading} />
@@ -114,10 +112,6 @@
           </span>
           <span title="The roll of the camera. Without a value the camera is level."><AutoNum label="Roll" unit="deg" kind="roll" step={0.1} bind:field={s.roll} required="level" /></span>
         </div>
-      {/if}
-      <label class="mt-2 flex items-start gap-1.5 text-copy" title="Use the camera of the previous sighting in this clip, when the view did not move">
-        <input type="checkbox" class="mt-[3px] shrink-0" bind:checked={s.sameCameraAsPrevious} /> Same camera as the previous sighting
-      </label>
       {#if todo.length}<div class="note warn mt-1.5">Still needs: {todo.join(', ')}.</div>
       {:else if !r.ok && !needsCoords(r.error)}<div class="note bad mt-1.5">{r.error}</div>{/if}
       {#each r.warnings as w}<div class="note warn mt-1">{w}</div>{/each}

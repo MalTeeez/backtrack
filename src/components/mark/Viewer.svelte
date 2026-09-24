@@ -8,18 +8,20 @@
    */
   import { Maximize2 } from '@lucide/svelte';
   import type { Pt, Sighting } from '../../lib/solver/types.ts';
-  import { drawMarks, drawNotes, hitMark, type Handle, type MarkTarget, type Note, type NoteBox } from './draw.ts';
+  import { drawDetection, drawMarks, drawNotes, hitMark, type DetectionView, type Handle, type MarkTarget, type Note, type NoteBox } from './draw.ts';
 
   let {
-    video, frame, sighting, others, copied, impact, pending, tool, lock, notes, onpoint, onhover, ondrag, onmiddle, onremove,
+    video, frame, sighting, others, copied, impact, pending, tool, lock, notes, detection = null, onpoint, onhover, ondrag, onmiddle, onremove,
   }: {
     video: HTMLVideoElement; frame: number; sighting: Sighting | undefined; pending: Pt | null; tool: boolean;
     /** Sightings of other shots on this frame, drawn faded. */
     others: Sighting[];
-    /** The edges this sighting copies with the camera of an earlier one, drawn dashed. */
+    /** Guide lines, drawn dashed: the vertical lines the detection took the pitch from. */
     copied: [Pt, Pt][];
     /** This frame is the impact of a shot: the viewer gets a red frame. */
     impact: boolean;
+    /** What the detection used and found on this frame, drawn under the marks. */
+    detection?: DetectionView | null;
     lock: Pt | null; notes: Note[]; onpoint: (p: Pt) => void; onhover: (p: Pt) => void; ondrag: (h: Handle, p: Pt) => void;
     onmiddle: (p: Pt) => void; onremove: (t: MarkTarget) => void;
   } = $props();
@@ -109,6 +111,7 @@
     const sc = (size.w / w) * zoom.k, left = inner.offsetLeft + zoom.ox, top = inner.offsetTop + zoom.oy;
     const T = (p: Pt): Pt => ({ x: (left + p.x * sc) * dpr, y: (top + p.y * sc) * dpr });
     const lw = 1.25 * dpr;
+    if (detection) drawDetection(g, detection, T, dpr, w, video.videoHeight);
     g.globalAlpha = 0.55;
     for (const o of others) drawMarks(g, o, null, T, lw);
     g.globalAlpha = 1;

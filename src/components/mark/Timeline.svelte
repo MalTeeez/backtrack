@@ -296,6 +296,7 @@
       {@const color = shotColor(si)}
       {@const list = project.sightings.filter((s) => s.shotId === sh.id && s.clipId === clipId)}
       {@const impact = clipId ? value(sh.impact[clipId])?.b : undefined}
+      {@const sec = clipId ? project.clips[clipId]?.sections?.find((x) => x.shotId === sh.id) : undefined}
       <div class="flex min-w-0 items-center gap-1.5 border-b border-r border-line px-2 text-[12px] {active ? 'bg-[var(--accent-soft)] text-text' : 'text-muted'}" data-testid="lane-{si}">
         <button class="flex min-w-0 flex-1 items-center gap-1.5 text-left {sh.excluded ? 'opacity-50' : ''}" onclick={() => (ui.shotId = sh.id)} title="Mark sightings for {sh.name}">
           <span class="h-2.5 w-2.5 shrink-0" style="background:{color}"></span>
@@ -313,6 +314,11 @@
         onpointercancel={() => (scrubEl = null)}
       >
         {#each ticks as k (k.t)}{#if k.major}<span class="pointer-events-none absolute inset-y-0 w-px bg-line opacity-60" style="left:{x(k.t)}"></span>{/if}{/each}
+        {#if sec}
+          <!-- the section of the detection, and the frames it left out -->
+          <span class="pointer-events-none absolute bottom-0 h-[3px] bg-accent/60" style="left:{x(sec.a)}; width:{((sec.b - sec.a) / span) * 100}%" title="Detection"></span>
+          {#each sec.dropped as d (d.t)}{#if inView(d.t)}<span class="pointer-events-none absolute bottom-0 h-2 w-px -translate-x-1/2 bg-warn" style="left:{x(d.t)}"></span>{/if}{/each}
+        {/if}
         {#if list.length && impact != null}
           <!-- the flight, from the first sighting to the impact -->
           {@const first = Math.min(...list.map((s) => s.timeS))}

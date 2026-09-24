@@ -2,14 +2,15 @@
  * Turns the whole project into a result for each shot, with its accuracy, and the guns the shots point to (phase 4).
  * Shots that agree on a gun combine; shots that do not come from another gun.
  */
-import { D2R, angleDiff, wrap360 } from './camera.ts';
+import { D2R, R2D, angleDiff, quadratic, wrap360 } from './camera.ts';
 import { MC_RUNS, makeJitter, percentile, type Rng } from './montecarlo.ts';
 import { GAME_UNIT_M, SOURCE_TOL_DEG, SightingSolver, anchorGame, craterGame, toMeters } from './sightings.ts';
 import { BALLISTICS, WEAPONS } from './ballistics.ts';
-import { costFloor } from './ballisticFit.ts';
+import { costFloor, rayMisses } from './ballisticFit.ts';
 import { confRatio, sigmaOf, value } from './field.ts';
 import { motionFlags, motionShotWarning, shellSpeeds } from './motion.ts';
 import { solveShot } from './solve.ts';
+import { independentDirection } from './independent.ts';
 import { intersectTracks, minCrossingAngle } from './tracks.ts';
 import type { Detected, Field, Fit, Grid, GroundAt, Gun, Heights, Id, ProjectData, Ray, ShiftPrior, Shot, SolveOptions, Vec3, Weapon } from './types.ts';
 
@@ -42,6 +43,17 @@ export interface ShotResult {
   crater?: { x: number; y: number; sigmaM: number };
   /** Two directions (deg) fit about equally well, so the suspected heading is required. */
   ambiguous?: { th: [number, number] };
+  /** The direction (deg) of the independent model (section 12.6): a straight flight with gravity, without the weapon. */
+  independent?: { dirDeg: number; rmsDeg: number };
+  /** How far (m) the solved spot of the user lies from the minimap position (section 13), when there is one. */
+  observerOffM?: number;
+  /**
+   * Each sighting against the fit (meters, like C): where the user was on its frame, the shell on the fitted flight
+   * then, the seconds before the impact, and the miss (deg) along the path of the shell (signed) and across it.
+   */
+  sightings?: { id: Id; tau: number; O: Vec3; P: Vec3; along: number; cross: number }[];
+  /** The frame time error (s) of the clip that the solve used, and whether it came from the marks. */
+  timing?: { s: number; measured: boolean };
 }
 
 /** The gun from all shots: combined by the accuracy of each shot, or where the tracks cross without one. */
@@ -67,28 +79,87 @@ export interface ProjectResult {
   weapon: { use: Weapon; field: Field<Weapon>; rms: Record<Weapon, number | null> };
 }
 
-/** The error (s) of a frame time, which moves a fast shell across the image (section 12.5). The capture test measures it. */
-export const TIMESTAMP_SIGMA_S = 0.005;
+/**
+ * The error (s) of a frame time, which moves a fast shell along its path in the image (section 12.5), when the marks
+ * of a clip cannot tell it (frameTiming): between the entire screen and a window capture of the capture test.
+ */
+export const TIMESTAMP_SIGMA_S = 0.015;
+/** The least and the largest frame time error (s) that frameTiming gives. */
+const TIMING_MIN_S = 0.003, TIMING_MAX_S = 0.08;
 /** How far (m) the minimap puts the user off where they really stood, for a position the user typed. */
 export const OBSERVER_SIGMA_M = 10;
 /** How far (m) a crater the user typed or measured may be off. */
 export const CRATER_SIGMA_M = 1;
+/** The independent model looks at the last part of the flight only (s): a straight flight with gravity. */
+const INDEPENDENT_S = 1;
 /** A weapon counts as found when the other weapon fits this many times worse (section 2.2). */
 export const WEAPON_RATIO = 2;
 
 /**
- * The rays of one shot, and how many sightings the solver skipped. Each ray gets the error of its frame time at the
- * speed the shell moves across the image, on top of the error of its mark.
+ * The rays of one shot, and how many sightings the solver skipped. Each ray gets the direction the shell moves in the
+ * image there (from its neighbors), and the error of its frame time at that speed as its error along the path.
  */
-function prepare(data: ProjectData, shot: Shot, solver: SightingSolver, speeds: Map<Id, number>): { rays: Ray[]; bad: number } {
+function prepare(data: ProjectData, shot: Shot, solver: SightingSolver, speeds: Map<Id, number>, timing: Map<Id, number>): { rays: Ray[]; bad: number } {
   const list = data.sightings.filter((s) => s.shotId === shot.id && !s.excluded);
-  const rays = list.flatMap((s) => {
-    const r = solver.solve(s);
-    if (!r.ok) return [];
-    const move = (speeds.get(s.id) ?? 0) * D2R * TIMESTAMP_SIGMA_S;
-    return [{ ...r.ray, sigma: Math.hypot(r.ray.sigma ?? 0, move) }];
+  const solved = list.flatMap((s) => { const r = solver.solve(s); return r.ok ? [{ s, ray: r.ray }] : []; });
+  const rays = solved.map(({ s, ray }) => {
+    const move = (speeds.get(s.id) ?? 0) * D2R * (timing.get(s.clipId) ?? TIMESTAMP_SIGMA_S);
+    return { ...ray, sigmaAlong: Math.hypot(ray.sigma ?? 0, move) };
   });
+  // the direction of motion at each ray: toward the next ray and from the one before, across the ray
+  const byClip = new Map<Id, number[]>();
+  solved.forEach(({ s }, k) => byClip.set(s.clipId, [...(byClip.get(s.clipId) ?? []), k]));
+  for (const ks of byClip.values()) {
+    ks.sort((a, b) => rays[b].tau - rays[a].tau); // in time order
+    ks.forEach((k, j) => {
+      const prev = rays[ks[Math.max(0, j - 1)]], next = rays[ks[Math.min(ks.length - 1, j + 1)]], D = rays[k].D;
+      if (prev === next) return;
+      const v = [next.D[0] - prev.D[0], next.D[1] - prev.D[1], next.D[2] - prev.D[2]];
+      const d = v[0] * D[0] + v[1] * D[1] + v[2] * D[2], t = [v[0] - d * D[0], v[1] - d * D[1], v[2] - d * D[2]];
+      const n = Math.hypot(t[0], t[1], t[2]);
+      if (n > 1e-9) rays[k].along = [t[0] / n, t[1] / n, t[2] / n];
+    });
+  }
   return { rays, bad: list.length - rays.length };
+}
+
+/**
+ * The error of the frame times of each clip (s), from the shell itself: it moves smoothly, so the jitter of its marks
+ * along its path against a local fit of their neighbors, over its speed, is the error of the frame times. Marks of a
+ * slow shell say little (their own error takes over), so only those moving faster than 3 deg/s count. The capture test
+ * measured 3 to 11 ms for a capture of the entire screen and about 27 ms for a window (capture-test-plan.md).
+ */
+export function frameTiming(data: ProjectData, solver: SightingSolver): Map<Id, number> {
+  const out = new Map<Id, number>(), errs = new Map<Id, number[]>();
+  for (const shot of data.shots) {
+    const byClip = new Map<Id, { t: number; D: Vec3 }[]>();
+    for (const s of data.sightings) {
+      if (s.shotId !== shot.id || s.excluded) continue;
+      const a = solver.aim(s);
+      if (a.ok) byClip.set(s.clipId, [...(byClip.get(s.clipId) ?? []), { t: s.timeS, D: a.D }]);
+    }
+    for (const [clip, pts] of byClip) {
+      pts.sort((a, b) => a.t - b.t);
+      // the position along the path: the angle walked from the first mark (deg)
+      const pos = [0];
+      for (let k = 1; k < pts.length; k++) {
+        const u = pts[k - 1].D, v = pts[k].D;
+        pos.push(pos[k - 1] + Math.acos(Math.max(-1, Math.min(1, u[0] * v[0] + u[1] * v[1] + u[2] * v[2]))) * R2D);
+      }
+      for (let k = 3; k < pts.length - 3; k++) {
+        const nb = [k - 3, k - 2, k - 1, k + 1, k + 2, k + 3], t0 = pts[k].t;
+        const fit = quadratic(nb.map((j) => pts[j].t - t0), nb.map((j) => pos[j]));
+        if (!fit || fit[1] < 3) continue;
+        (errs.get(clip) ?? errs.set(clip, []).get(clip)!).push((pos[k] - fit[0]) / fit[1]);
+      }
+    }
+  }
+  for (const [clip, e] of errs) {
+    if (e.length < 5) continue;
+    const med = [...e].sort((a, b) => a - b)[e.length >> 1], mad = e.map((x) => Math.abs(x - med)).sort((a, b) => a - b)[e.length >> 1];
+    out.set(clip, Math.min(TIMING_MAX_S, Math.max(TIMING_MIN_S, 1.4826 * mad)));
+  }
+  return out;
 }
 
 /**
@@ -144,12 +215,12 @@ function setup(shot: Shot, heights?: Heights): Setup | null {
 
 /** Solves the shots of a project with one weapon, without Monte Carlo runs: the RMS fit error over all shots. */
 function weaponError(data: ProjectData, weapon: Weapon, heights?: Heights, ground?: GroundAt): number | null {
-  const solver = new SightingSolver(data, undefined, heights), speeds = speedsAt(data, solver);
+  const solver = new SightingSolver(data, undefined, heights), speeds = speedsAt(data, solver), timing = frameTiming(data, solver);
   let ss = 0, n = 0;
   for (const shot of data.shots) {
     const su = !shot.excluded && setup(shot, heights);
     if (!su) continue;
-    const { rays } = prepare(data, shot, solver, speeds);
+    const { rays } = prepare(data, shot, solver, speeds, timing);
     const sol = solveShot(rays, su.C, { ...options(data, shot, weapon, su.C, heights, ground), priors: su.prior && { [shot.clipId!]: su.prior } });
     if (sol.error !== undefined) continue;
     ss += sol.fit.rms ** 2 * sol.n; n += sol.n;
@@ -187,7 +258,7 @@ export function solveProject(data: ProjectData, rng: Rng = Math.random, runs = M
   const jittered = Array.from({ length: runs }, () => new SightingSolver(data, makeJitter(data.settings, rng), heights));
   const shots: ShotResult[] = [];
   const jumps = motionFlags(data, exact);
-  const speeds = speedsAt(data, exact);
+  const speeds = speedsAt(data, exact), timing = frameTiming(data, exact);
   const weapon = pickWeapon(data, heights, ground);
 
   for (const shot of data.shots) {
@@ -199,7 +270,7 @@ export function solveProject(data: ProjectData, rng: Rng = Math.random, runs = M
     const su = setup(shot, heights);
     if (!su) { r.error = 'Enter the crater X and Y in Coordinates, or where you stood.'; continue; }
     const clip = shot.clipId!;
-    const prep = prepare(data, shot, exact, speeds);
+    const prep = prepare(data, shot, exact, speeds, timing);
     if (prep.bad) r.notes.push(`The solver skipped ${prep.bad} incomplete sighting(s).`);
 
     const opt: SolveOptions = { ...options(data, shot, weapon.use, su.C, heights, ground), priors: su.prior && { [clip]: su.prior } };
@@ -214,11 +285,16 @@ export function solveProject(data: ProjectData, rng: Rng = Math.random, runs = M
     r.C = C;
     if (heights) r.ground = { crater: C[2], gun: opt.zGun };
     Object.assign(r, { fit: sol.fit, gun: { ...sol.gun, x: sol.gun.x + mx, y: sol.gun.y + my }, n: sol.n });
-    r.observers = Object.values(sol.fit.shifts).map(([dx, dy]): Vec3 => [C[0] + dx, C[1] + dy, C[2]]);
+    const zObs = heights?.observer?.[shot.id] ?? su.C[2];
+    r.observers = Object.values(sol.fit.shifts).map(([dx, dy]): Vec3 => [C[0] + dx, C[1] + dy, zObs]);
+    const at = (p: Vec3): Vec3 => [p[0] + mx, p[1] + my, p[2]];
+    r.sightings = rayMisses(opt.ballistics, sol.fit, prep.rays, su.C, opt.zGun).map((m, k) => (
+      { id: prep.rays[k].sighting!, tau: prep.rays[k].tau, O: at(m.O), P: at(m.P), along: +m.along.toFixed(4), cross: +m.cross.toFixed(4) }));
+    r.timing = { s: timing.get(clip) ?? TIMESTAMP_SIGMA_S, measured: timing.has(clip) };
 
     const shifts: [number, number][] = [];
     for (const J of jittered) {
-      const m = solveShot(prepare(data, shot, J, speeds).rays, su.C, { ...opt, near: { th: sol.fit.th, e: sol.fit.e } });
+      const m = solveShot(prepare(data, shot, J, speeds, timing).rays, su.C, { ...opt, near: { th: sol.fit.th, e: sol.fit.e } });
       if (m.error !== undefined) continue;
       const [jx, jy] = move(m.fit.shifts[clip]);
       r.mc.push({ x: m.gun.x + jx, y: m.gun.y + jy, th: m.fit.th });
@@ -237,9 +313,15 @@ export function solveProject(data: ProjectData, rng: Rng = Math.random, runs = M
       const sObs = (sigmaOf(shot.observer[clip]) ?? OBSERVER_SIGMA_M / GAME_UNIT_M) * GAME_UNIT_M;
       r.crater = { x: C[0] / GAME_UNIT_M, y: C[1] / GAME_UNIT_M, sigmaM: Math.hypot(spread, sObs) };
     }
+    // the second opinion on the direction: the last second of the flight, or the 6 rays nearest the impact
+    const late = [...prep.rays].sort((a, b) => a.tau - b.tau);
+    r.independent = independentDirection(late.filter((x, k) => x.tau <= INDEPENDENT_S || k < 6)) ?? undefined;
     if (su.prior) {
-      // the minimap position against where the rays put the user (section 10.3)
-      const [sx, sy] = sol.fit.shifts[clip], d = Math.hypot(sx - su.prior.s[0], sy - su.prior.s[1]);
+      // the minimap position against where the rays alone put the user (sections 10.3 and 13): the fit with the
+      // prior is pulled toward it, so it would hide a disagreement
+      const free = solveShot(prep.rays, su.C, { ...opt, priors: undefined, near: { th: sol.fit.th, e: sol.fit.e } });
+      const [sx, sy] = free.error === undefined ? free.fit.shifts[clip] : sol.fit.shifts[clip], d = Math.hypot(sx - su.prior.s[0], sy - su.prior.s[1]);
+      r.observerOffM = d;
       if (d > 3 * su.prior.sigma && d > OBSERVER_SIGMA_M) r.notes.push(`The sightings put you ${d.toFixed(0)} m from where the minimap and the crater put you. Check the crater and the impact time.`);
     }
 

@@ -26,7 +26,7 @@ export const newShot = (n: number): Shot => ({ id: uid(), name: `Shot ${n}`, cra
 
 /** A new sighting on a frame, with every field empty. */
 export const newSighting = (s: Pick<Sighting, 'shotId' | 'clipId' | 'timeS' | 'frameW' | 'frameH'>): Sighting =>
-  ({ id: uid(), ...s, shell: {}, edges: [], heading: {}, pitch: {}, roll: {}, sameCameraAsPrevious: false });
+  ({ id: uid(), ...s, shell: {}, edges: [], heading: {}, pitch: {}, roll: {} });
 
 /**
  * The version of the saved project. The data of another version does not load: Backtrack is still in development and
@@ -56,7 +56,7 @@ export interface Ui {
   folded: Record<Id, boolean>;
   /** The result map: its view (null follows the result) and its terrain layers. */
   resultView: MapView | null;
-  layers: { steep: boolean; out: boolean; high: boolean };
+  layers: { steep: boolean; out: boolean; high: boolean; sightings: boolean };
   /** The map panels by shot (crater) or sighting (where the user stood): open or not, and their view. */
   mapOpen: Record<Id, boolean>;
   mapViews: Record<Id, MapView>;
@@ -64,6 +64,10 @@ export interface Ui {
   mapShown: Record<Id, MapId>;
   /** Clips whose map prompt the user closed without a map. */
   mapAsked: Record<Id, boolean>;
+  /** The Mark phase shows the video, the stabilized view of the detection, or both (automation plan section 5.4). */
+  view: 'video' | 'stab' | 'both';
+  /** The video shows what the detection used and found on each frame. */
+  cv: boolean;
 }
 type Span = { a: number; b: number };
 export type MapView = { cx: number; cy: number; span: number };
@@ -71,8 +75,8 @@ export type MapView = { cx: number; cy: number; span: number };
 export type ClipView = { t?: number; zoom?: Span; loop?: Span };
 export const ui: Ui = $state({
   phase: 'record', shotId: null, clipId: null, sightingId: null, tool: null, split: false,
-  clipViews: {}, speed: 1, magZoom: 8, folded: {}, resultView: null, layers: { steep: true, out: true, high: true }, mapOpen: {}, mapViews: {},
-  mapShown: {}, mapAsked: {},
+  clipViews: {}, speed: 1, magZoom: 8, folded: {}, resultView: null, layers: { steep: true, out: true, high: true, sightings: true }, mapOpen: {}, mapViews: {},
+  mapShown: {}, mapAsked: {}, view: 'video', cv: true,
 });
 /** The view of a clip, made on first use. Not for use inside $derived, which may not change state. */
 export const clipView = (id: Id): ClipView => { ui.clipViews[id] ??= {}; return ui.clipViews[id]; };

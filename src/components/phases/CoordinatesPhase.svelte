@@ -5,6 +5,7 @@
   import FieldTag from '../FieldTag.svelte';
   import UseToggle from '../UseToggle.svelte';
   import CraterMap from '../CraterMap.svelte';
+  import { openSettings } from '../SettingsDialog.svelte';
   import { SOURCE_TOL_DEG, craterGame } from '../../lib/solver/sightings.ts';
   import { value } from '../../lib/solver/field.ts';
   import { addShot, clips, deleteShot, project, shotsOf, ui, WEAPONS } from '../../lib/state/project.svelte.ts';
@@ -17,6 +18,8 @@
   const clipName = $derived(clips.list.find((c) => c.id === ui.clipId)?.name);
   const count = (id: Id) => project.sightings.filter((s) => s.shotId === id).length;
   const resultOf = (id: Id) => solved.result?.shots.find((r) => r.shotId === id);
+  /** The crater map is open when the user opened it, or by default on a crater the solver found (section 11.3). */
+  const mapShown = (s: Shot, r: ReturnType<typeof resultOf>) => ui.mapOpen[s.id] ?? (!!r?.crater && !craterGame(s));
   const round = (v: number | undefined) => (v == null ? undefined : Math.round(v * 100) / 100);
   const fmtXY = (p: unknown) => { const q = p as XY; return `${q.x.toFixed(2)}, ${q.y.toFixed(2)}`; };
 
@@ -72,7 +75,7 @@
           <div class="flex flex-col gap-1.5 border-b border-line pb-3 last:border-b-0 last:pb-0">
             <div class="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-end gap-1.5">
               <label class="flex min-w-0 flex-col gap-1"><span class="label truncate">Shot ({count(s.id)} sightings)</span><input class="control" bind:value={s.name} /></label>
-              <button class="option justify-center px-2" aria-pressed={!!ui.mapOpen[s.id]} onclick={() => (ui.mapOpen[s.id] = !ui.mapOpen[s.id])}>Map</button>
+              <button class="option justify-center px-2" aria-pressed={mapShown(s, r)} onclick={() => (ui.mapOpen[s.id] = !mapShown(s, r))}>Map</button>
               <span class="grid h-[30px] place-items-center px-1"><UseToggle target={s} what="this shot" /></span>
               <button class="btn icon" aria-label="Delete {s.name}" onclick={() => deleteShot(s.id)}><Trash2 size={13} /></button>
             </div>
@@ -126,7 +129,8 @@
               </div>
               <NumInput label="Tolerance" unit="deg" bind:value={() => s.sourceTolDeg ?? SOURCE_TOL_DEG, (v) => (s.sourceTolDeg = v)} step={1} min={1} />
             </div>
-            {#if ui.mapOpen[s.id]}<CraterMap viewId={s.id} shot={s} reachM={st.rangeMaxM} observer={value(obs)} />{/if}
+            <!-- the map opens on the crater the solver found, when the user gave none (automation plan section 11.3) -->
+            {#if mapShown(s, r)}<CraterMap viewId={s.id} shot={s} reachM={st.rangeMaxM} observer={value(obs)} solved={r?.crater} />{/if}
           </div>
         {/each}
       </div>
@@ -137,14 +141,8 @@
     <section class="card">
       <header class="card-head"><h2 class="card-title" title="Use the FOV from the game settings. A wrong FOV gives wrong angles.">Camera</h2></header>
       <div class="card-body grid grid-cols-2 gap-2">
-        <NumInput required label="Game FOV" unit="deg" bind:value={() => st.fovDeg, (v) => (st.fovDeg = v!)} min={10} />
-        <div class="flex flex-col gap-1">
-          <span class="label">FOV type</span>
-          <div class="grid grid-cols-2 gap-1">
-            <button class="option justify-center px-1" aria-pressed={st.fovAxis === 'h'} onclick={() => (st.fovAxis = 'h')}>Horizontal</button>
-            <button class="option justify-center px-1" aria-pressed={st.fovAxis === 'v'} onclick={() => (st.fovAxis = 'v')}>Vertical</button>
-          </div>
-        </div>
+        <dl class="dl col-span-2 text-[12px]"><dt>Game FOV</dt><dd class="num">{st.fovDeg} deg ({st.fovAxis === 'h' ? 'horizontal' : 'vertical'})</dd></dl>
+        <button class="btn sm col-span-2 w-fit" onclick={openSettings} title="The FOV is a setting of this browser, for every project">Change in the settings</button>
       </div>
     </section>
 

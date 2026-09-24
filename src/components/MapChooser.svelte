@@ -6,8 +6,10 @@
   import { MAPS } from '../lib/map/tiles.svelte.ts';
   import type { Detected, MapId } from '../lib/solver/types.ts';
 
-  let { value, onpick, big = false, auto, onskip }: {
+  let { value, onpick, big = false, auto, onskip, searching = false }: {
     value: MapId | undefined; onpick: (id: MapId | undefined) => void; big?: boolean;
+    /** The minimap search is still running. */
+    searching?: boolean;
     /** What the minimap search found, shown first with its confidence. */
     auto?: Detected<MapId>;
     /** The prompt can be closed without a map. */
@@ -21,6 +23,7 @@
   <div class="absolute inset-0 z-10 grid place-items-center bg-[var(--bg)]/70 p-4">
     <div class="card flex max-w-md flex-col items-center gap-3 p-5 text-center">
       <span class="title text-[22px] text-text" title="The maps show its image and the solver uses its terrain once you pick it.">Which map is it?</span>
+      {#if searching}<span class="text-[12px] text-muted">Looking at the minimap...</span>{:else if auto && !auto.value}<span class="text-[12px] text-muted">The minimap did not show the map clearly.</span>{/if}
       <div class="flex flex-wrap justify-center gap-2" data-testid="map-choice">
         {#each order as [id, name]}
           <button class="btn {id === auto?.value ? 'primary' : ''}" onclick={() => onpick(id)} title={id === auto?.value ? `Found in the minimap, ${Math.round(auto.conf * 100)} percent sure` : undefined}>

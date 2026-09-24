@@ -111,3 +111,13 @@ export function project(P: Vec3, O: Vec3, w: number, h: number, f: number, headi
   if (z <= 0) return null;
   return { x: w / 2 + (f * dot(R)) / z, y: h / 2 - (f * dot(U)) / z };
 }
+
+/** y = a + b x + c x^2 by least squares: [a, b, c], or null. */
+export function quadratic(xs: number[], ys: number[]): number[] | null {
+  const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], y = [0, 0, 0];
+  xs.forEach((x, i) => { const r = [1, x, x * x]; for (let a = 0; a < 3; a++) { y[a] += r[a] * ys[i]; for (let b = 0; b < 3; b++) A[a][b] += r[a] * r[b]; } });
+  const det = (m: number[][]) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const D = det(A);
+  if (Math.abs(D) < 1e-18) return null;
+  return [0, 1, 2].map((c) => det(A.map((row, r) => row.map((v, cc) => (cc === c ? y[r] : v)))) / D);
+}

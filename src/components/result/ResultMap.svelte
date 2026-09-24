@@ -1,7 +1,8 @@
 <script lang="ts">
   /**
    * Canvas map in game coordinates: craters, estimated observer positions, tracks and Monte Carlo guns, over the map
-   * imagery. It starts on everything the result has. The wheel zooms around the pointer, a drag pans, and Fit goes back.
+   * imagery. The sightings layer draws the line of sight of each sighting, from where the user was on its frame to the
+   * shell on the fitted flight, colored by its miss, the walk of the user through those spots, and the minimap position. It starts on everything the result has. The wheel zooms around the pointer, a drag pans, and Fit goes back.
    */
   import { compassRose, css } from '../mark/draw.ts';
   import type { ProjectResult } from '../../lib/solver/result.ts';
@@ -13,6 +14,7 @@
   import { Maximize2 } from '@lucide/svelte';
   import MapChooser from '../MapChooser.svelte';
   import { WEAPONS, clipInfo, clipMap, project, ui } from '../../lib/state/project.svelte.ts';
+  import { value } from '../../lib/solver/field.ts';
 
   let { result, map, clipId }: { result: ProjectResult; map?: MapId; clipId: Id | null } = $props();
   // the range of the weapon the solve used: the settings for the user's pick, else the weapon's own
@@ -53,10 +55,13 @@
     { key: 'steep', label: 'Steep ground', swatch: 'rgb(140,25,25)', tip: `Ground steeper than ${STEEP_DEG} deg, where a gun vehicle is unlikely to stand. Hollow dots are Monte Carlo guns on such ground.` },
     { key: 'out', label: 'Out of reach', swatch: 'rgb(40,170,80)', tip: 'Ground no shell of the gun can land on, from the terrain only (no buildings or trees).' },
     { key: 'high', label: 'High arc only', swatch: 'rgb(235,190,40)', tip: 'Ground only the high arc of the gun lands on, with a long flight time.' },
+    { key: 'sightings', label: 'Sightings', swatch: 'var(--ok)', tip: 'The line of sight of each sighting, from where you were on its frame to the shell on the fitted flight: green within 0.1 deg of the fit, orange within 0.3 deg, red beyond. A thin line joins where you were when you walked. The hollow triangle is the minimap position.' },
   ];
+  /** The color of a sighting by its miss (deg) against the fit. */
+  const missColor = (deg: number) => css(deg <= 0.1 ? '--ok' : deg <= 0.3 ? '--warn' : '--bad');
 
   // only the layers the result has: steep ground needs terrain, the reach layers need the second worker message
-  const shownLayers = $derived(LAYERS.filter((l) => (l.key === 'steep' ? result.shots.some((r) => r.slope) : !!result.safe)));
+  const shownLayers = $derived(LAYERS.filter((l) => (l.key === 'steep' ? result.shots.some((r) => r.slope) : l.key === 'sightings' ? result.shots.some((r) => r.sightings?.length) : !!result.safe)));
 
   let shown = { cx: 0, cy: 0, sc: 1 }; // the view of the last drawing, for the pointer
   const toMeters = (e: MouseEvent) => {
@@ -174,6 +179,36 @@
         const spots: [number, number][] = [[px - tw / 2, py - rad - 7], [px - tw / 2, py + rad + 16], [px + rad + 6, py + 5], [px - rad - tw - 6, py + 5]];
         const spot = spots.find(([x, y]) => x > 4 && x + tw < W - 4 && y > 70 && y < H - 8);
         if (spot) label(text, spot[0], spot[1]);
+      }
+    }
+
+    if (ui.layers.sightings) for (const r of result.shots) drawSightings(r);
+    function drawSightings(r: ProjectResult['shots'][number]) {
+      const ss = r.sightings;
+      if (!ss?.length) return;
+      g.lineCap = 'round';
+      for (const s of ss) {
+        const [ax, ay] = T(s.O[0], s.O[1]), [bx, by] = T(s.P[0], s.P[1]);
+        g.strokeStyle = missColor(Math.hypot(s.along, s.cross)); g.globalAlpha = 0.75; g.lineWidth = 1.25;
+        g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+        g.globalAlpha = 1; g.fillStyle = g.strokeStyle;
+        g.beginPath(); g.arc(bx, by, 2.5, 0, 7); g.fill();
+      }
+      // the walk: where the user was, in time order, when it moved more than a meter
+      const walk = [...ss].sort((a, b) => b.tau - a.tau), w0 = walk[0].O, w1 = walk[walk.length - 1].O;
+      if (Math.hypot(w1[0] - w0[0], w1[1] - w0[1]) > 1) {
+        g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 4;
+        const path = () => { g.beginPath(); walk.forEach((s, k) => (k ? g.lineTo(...T(s.O[0], s.O[1])) : g.moveTo(...T(s.O[0], s.O[1])))); g.stroke(); };
+        path(); g.strokeStyle = css('--accent'); g.lineWidth = 2; path();
+        g.fillStyle = css('--accent');
+        for (const s of walk) { const [x, y] = T(s.O[0], s.O[1]); g.beginPath(); g.arc(x, y, 2.5, 0, 7); g.fill(); }
+      }
+      // the minimap position, against the solved one
+      const shot = project.shots.find((x) => x.id === r.shotId), mm = shot?.clipId ? value(shot.observer[shot.clipId]) : undefined;
+      if (mm) {
+        const [ox, oy] = T(mm.x * 100, mm.y * 100);
+        g.strokeStyle = css('--accent'); g.lineWidth = 2;
+        g.beginPath(); g.moveTo(ox, oy - 11); g.lineTo(ox + 10, oy + 7); g.lineTo(ox - 10, oy + 7); g.closePath(); g.stroke();
       }
     }
 

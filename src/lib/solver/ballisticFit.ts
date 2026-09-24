@@ -12,20 +12,40 @@ import type { Fit, GroundAt, Id, Ray, ShiftPrior, Vec3 } from './types.ts';
 const RAY_SIGMA = 1e-3;
 
 /**
- * The ground shift (m) of the observer that brings the rays closest to the shell points P, by weighted least squares
- * on the distance of each point from its ray: a ray counts with its angular error times the distance of its point.
- * The rays start at the crater, and the user stood near it, but not on it. A prior (where the minimap puts the user)
- * pulls the shift toward itself with its own error.
+ * The ground shift (m) of the observer that brings the rays closest to the shell points P, by least squares on the
+ * distance of each point from its ray, across the path of the shell and (with less weight) along it. The rays start at
+ * the crater, and the user stood near it, but not on it. A prior (where the minimap puts the user) pulls the shift
+ * toward itself with its own error.
  */
 export function observerShift(rays: Ray[], P: Vec3[], prior?: ShiftPrior): [number, number] {
   let a = 0, b = 0, d = 0, u = 0, w = 0;
+  /** Adds the direction e (unit, across the ray) with the weight k: the miss of the point along e is (q - s) . e. */
+  const add = (e: number[], k: number, q: number[]) => {
+    const eq = e[0] * q[0] + e[1] * q[1] + e[2] * q[2];
+    a += k * e[0] * e[0]; b += k * e[0] * e[1]; d += k * e[1] * e[1];
+    u += k * e[0] * eq; w += k * e[1] * eq;
+  };
+  const qs = rays.map((r, i) => [P[i][0] - r.O[0], P[i][1] - r.O[1], P[i][2] - r.O[2]]);
+  // every ray counts the same, in meters of the typical miss, so a prior (in meters) weighs right against them. A
+  // weight per ray by its own miss in meters (its angular error times its distance) trusts the rays near the observer
+  // too much: on the benchmark it doubled the gun error with frame time errors of 30 ms.
+  const miss = rays.map((r, i) => (r.sigma ?? RAY_SIGMA) * Math.hypot(qs[i][0], qs[i][1], qs[i][2])).sort((x, y) => x - y);
+  const k0 = 1 / Math.max(0.05, miss[miss.length >> 1] ?? 1) ** 2;
   rays.forEach((r, i) => {
-    const D = r.D, q = [P[i][0] - r.O[0], P[i][1] - r.O[1], P[i][2] - r.O[2]];
-    const sm = Math.max(0.05, (r.sigma ?? RAY_SIGMA) * Math.hypot(q[0], q[1], q[2])), k = 1 / (sm * sm);
-    // M = I - D D^T keeps the part across the ray. The shift moves only x and y.
-    const dq = D[0] * q[0] + D[1] * q[1] + D[2] * q[2];
-    a += k * (1 - D[0] * D[0]); b -= k * D[0] * D[1]; d += k * (1 - D[1] * D[1]);
-    u += k * (q[0] - D[0] * dq); w += k * (q[1] - D[1] * dq);
+    const D = r.D, q = qs[i];
+    // along the path, a ray counts less by its larger error there: an uncertain frame time moves it along the path
+    const sc = r.sigma ?? RAY_SIGMA, k = (sig: number) => k0 * (sc / sig) ** 2;
+    if (r.along) {
+      // along the path of the shell and across it
+      const t = r.along, c = [D[1] * t[2] - D[2] * t[1], D[2] * t[0] - D[0] * t[2], D[0] * t[1] - D[1] * t[0]];
+      add(c, k(sc), q);
+      add(t, k(r.sigmaAlong ?? sc), q);
+    } else {
+      // M = I - D D^T keeps the part across the ray. The shift moves only x and y.
+      const kk = k(sc), dq = D[0] * q[0] + D[1] * q[1] + D[2] * q[2];
+      a += kk * (1 - D[0] * D[0]); b -= kk * D[0] * D[1]; d += kk * (1 - D[1] * D[1]);
+      u += kk * (q[0] - D[0] * dq); w += kk * (q[1] - D[1] * dq);
+    }
   });
   if (prior) {
     const k = 1 / (prior.sigma * prior.sigma);
@@ -56,32 +76,61 @@ const MODEL_M = 10;
  * RMS miss (m), the RMS of the angle beyond what a miss of MODEL_M explains (deg), and the robust cost the search
  * minimizes, where each miss counts in units of the error of its ray (`w` scales each ray, section 12.5).
  */
-function evaluate(c: Candidate, clips: Map<Id, Ray[]>, n: number, C: Vec3, zGun: number, w: Map<Ray, number>, priors?: Record<Id, ShiftPrior>) {
+function evaluate(c: Candidate, clips: Map<Id, Ray[]>, n: number, C: Vec3, zGun: number, w: Map<Ray, { cross: number; along: number }>, priors?: Record<Id, ShiftPrior>) {
   const th = c.th * D2R, dx = Math.sin(th), dy = Math.cos(th);
   const gx = C[0] + c.R * dx, gy = C[1] + c.R * dy;
   const shifts: Record<Id, [number, number]> = {};
+  const rho = (x: number) => ROBUST * ROBUST * Math.log1p((x / ROBUST) ** 2);
   let ss = 0, cost = 0, sm = 0, so = 0;
   for (const [clip, rays] of clips) {
     const P = rays.map((r): Vec3 => { const p = at(c.f, c.T - r.tau); return [gx - p.x * dx, gy - p.x * dy, zGun + p.z]; });
     const [ox, oy] = (shifts[clip] = observerShift(rays, P, priors?.[clip]));
     rays.forEach((r, i) => {
-      const v = [P[i][0] - r.O[0] - ox, P[i][1] - r.O[1] - oy, P[i][2] - r.O[2]];
-      const len = Math.hypot(v[0], v[1], v[2]), cos = (v[0] * r.D[0] + v[1] * r.D[1] + v[2] * r.D[2]) / len;
-      const a = Math.acos(Math.max(-1, Math.min(1, cos))), over = Math.max(0, a - Math.atan(MODEL_M / len));
+      const { a, len, al, cr } = rayMiss(r, P[i], ox, oy), over = Math.max(0, a - Math.atan(MODEL_M / len));
       ss += a * a; sm += (Math.sin(a) * len) ** 2; so += over * over;
-      cost += ROBUST * ROBUST * Math.log1p(((a * w.get(r)!) / ROBUST) ** 2);
+      const s = w.get(r)!;
+      cost += al == null ? rho(a * s.along) : rho(cr * s.cross) + rho(al * s.along);
     });
   }
   return { shifts, rms: Math.sqrt(ss / n) * R2D, missM: Math.sqrt(sm / n), excess: Math.sqrt(so / n) * R2D, cost };
 }
 
 /**
- * The scale of each ray in the cost: the median error of the rays over its own, so a typical ray keeps the scale
- * ROBUST and a ray with a larger error (a fast shell, a vague mark) counts less.
+ * The miss of a ray that starts shifted by (ox, oy) against the shell point P: the angle `a` (rad) and the distance
+ * `len` (m), and with the path direction of the ray, the miss split along the path of the shell (`al`, signed: ahead
+ * of the mark is positive) and across it (`cr`, unsigned).
  */
-function rayScales(rays: Ray[]): Map<Ray, number> {
+function rayMiss(r: Ray, P: Vec3, ox: number, oy: number) {
+  const v = [P[0] - r.O[0] - ox, P[1] - r.O[1] - oy, P[2] - r.O[2]];
+  const len = Math.hypot(v[0], v[1], v[2]), cos = (v[0] * r.D[0] + v[1] * r.D[1] + v[2] * r.D[2]) / len;
+  const a = Math.acos(Math.max(-1, Math.min(1, cos)));
+  if (!r.along) return { a, len, al: undefined, cr: 0 };
+  const m = [v[0] / len - cos * r.D[0], v[1] / len - cos * r.D[1], v[2] / len - cos * r.D[2]];
+  const al = m[0] * r.along[0] + m[1] * r.along[1] + m[2] * r.along[2];
+  return { a, len, al, cr: Math.sqrt(Math.max(0, Math.sin(a) ** 2 - al * al)) };
+}
+
+/**
+ * Each ray against a fit, for the pictures of the result: where the user was on its frame (O, with the shift of its
+ * clip), the shell on the fitted flight at that moment (P), and the miss (deg) along the path of the shell and across it.
+ */
+export function rayMisses(b: Ballistics, fit: Fit, rays: Ray[], C: Vec3, zGun: number) {
+  const th = fit.th * D2R, dx = Math.sin(th), dy = Math.cos(th), f = flightAt(b, fit.e);
+  return rays.map((r) => {
+    const p = at(f, fit.T - r.tau), P: Vec3 = [C[0] + fit.R * dx - p.x * dx, C[1] + fit.R * dy - p.x * dy, zGun + p.z];
+    const [ox, oy] = fit.shifts[r.clip] ?? [0, 0], m = rayMiss(r, P, ox, oy);
+    return { O: [r.O[0] + ox, r.O[1] + oy, r.O[2]] as Vec3, P, along: (m.al ?? 0) * R2D, cross: (m.al == null ? m.a : m.cr) * R2D };
+  });
+}
+
+/**
+ * The scales of each ray in the cost, across the path of the shell and along it: the median error of the rays over
+ * its own, so a typical ray keeps the scale ROBUST and a larger error (a vague mark; a fast shell with an uncertain
+ * frame time, along its path) counts less.
+ */
+function rayScales(rays: Ray[]): Map<Ray, { cross: number; along: number }> {
   const sig = rays.map((r) => r.sigma ?? RAY_SIGMA), ref = [...sig].sort((a, b) => a - b)[sig.length >> 1];
-  return new Map(rays.map((r, i) => [r, ref / sig[i]]));
+  return new Map(rays.map((r, i) => [r, { cross: ref / sig[i], along: ref / (r.sigmaAlong ?? sig[i]) }]));
 }
 
 export interface BallisticOptions {

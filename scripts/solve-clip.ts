@@ -22,5 +22,7 @@ for (const s of r.shots) {
   if (!s.fit) { console.log(s.name, s.error ?? 'no fit'); continue; }
   const obs = s.observers.map((o) => `${g(o[0])}, ${g(o[1])}`).join('; ');
   console.log(`${s.name}: direction ${s.fit.th.toFixed(1)} deg, gun ${g(s.gun!.x)}, ${g(s.gun!.y)}, range ${s.gun!.range.toFixed(0)} m, fit ${s.fit.rms.toFixed(2)} deg, err90 ${s.err90?.toFixed(0)} m, observer ${obs}${s.crater ? `, crater ${s.crater.x.toFixed(2)}, ${s.crater.y.toFixed(2)} +/-${s.crater.sigmaM.toFixed(0)} m` : ''}`);
+  if (s.independent) console.log(`  straight flight over the last second: ${s.independent.dirDeg.toFixed(1)} deg (fit ${s.independent.rmsDeg.toFixed(2)} deg)`);
+  if (s.observerOffM != null) console.log(`  minimap vs solved: ${s.observerOffM.toFixed(0)} m`);
   for (const note of s.notes) console.log(`  - ${note}`);
 }
