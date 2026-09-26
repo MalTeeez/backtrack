@@ -4,7 +4,7 @@
  */
 import { decodeFrames, type Frame } from '../../src/lib/vision/decode.ts';
 import { loadCv } from '../../src/lib/vision/cv.ts';
-import { detectSection } from '../../src/lib/vision/pipeline.ts';
+import { detectMap, detectSection, walkMatches } from '../../src/lib/vision/pipeline.ts';
 import { Pool, poolRunner } from '../../src/lib/vision/pool.ts';
 import { localRunner, stabilize } from '../../src/lib/vision/stabilize.ts';
 import { rotationAngle } from '../../src/lib/vision/rotation.ts';
@@ -86,7 +86,7 @@ const ms = (t: number) => `${(performance.now() - t).toFixed(0)} ms`;
     const s2 = [...dts].sort((x, y) => x - y), med = s2[s2.length >> 1], mad = [...dts.map((x) => Math.abs(x - med))].sort((x, y) => x - y)[dts.length >> 1];
     const rms = Math.sqrt(dts.reduce((x, v) => x + v * v, 0) / dts.length);
     log(`timing: ${dts.length} frames of the turn, error rms ${(1000 * rms).toFixed(1)} ms, robust sigma ${(1000 * 1.4826 * mad).toFixed(1)} ms, largest ${(1000 * Math.max(...dts.map(Math.abs))).toFixed(0)} ms, ${ok.length} of ${frames.length} frames stabilized, axis ${an.toFixed(3)}`);
-    w.__result = {};
+    w.__result = { frames: stT.frames.map((f) => ({ t: f.t, R: f.R, ok: f.ok })) };
     return;
   }
   if (q.get('task') === 'crops') {
@@ -99,6 +99,23 @@ const ms = (t: number) => `${(performance.now() - t).toFixed(0)} ms`;
       c.width = m.w; c.height = m.h;
       c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(m.data), m.w, m.h), 0, 0);
       w.__images![`mm_${f.t.toFixed(2)}`] = c.toDataURL('image/png');
+    }
+    w.__result = {};
+    return;
+  }
+  if (q.get('task') === 'walk') {
+    // the minimap of each walk point, for templates over several spans (s): how much each match stands out, and how
+    // far each lies from the median of the points
+    const pool = new Pool(), inp = { frames, a, b, fovDeg: 100, fovAxis: 'h' as const, map: (q.get('map') as MapId) || undefined, maps: MAPS, tiles: loadTile, mapInfo };
+    const mm = await detectMap(cv, inp, pool);
+    if (!mm?.at.value) { log('walk: no minimap'); w.__result = {}; return; }
+    log(`walk: minimap ${mm.map.value} at ${mm.at.value.x.toFixed(2)},${mm.at.value.y.toFixed(2)} ${mm.mpp} m/px, ratio conf ${mm.at.conf.toFixed(2)}`);
+    for (const span of (q.get('spans') ?? '0,0.1,0.3,0.5').split(',').map(Number)) {
+      const t0 = performance.now(), found = (await walkMatches(cv, inp, frames, H / 2160, mm, pool, span))!;
+      const ok = found.filter((f) => f.m), med = (xs: number[]) => [...xs].sort((u, v) => u - v)[xs.length >> 1];
+      const mx = med(ok.map((f) => f.m!.x)), my = med(ok.map((f) => f.m!.y));
+      const ratios = found.map((f) => (f.m ? f.m.score / Math.max(f.m.next, 1e-3) : 0));
+      log(`span ${span}: ${ms(t0)}, ratio min ${Math.min(...ratios).toFixed(2)} median ${med(ratios).toFixed(2)}, ${ratios.filter((r) => r >= 2).length}/${found.length} kept, offsets (m) ${ok.map((f) => (Math.hypot(f.m!.x - mx, f.m!.y - my) * 100).toFixed(1)).join(' ')}`);
     }
     w.__result = {};
     return;
@@ -143,14 +160,19 @@ const ms = (t: number) => `${(performance.now() - t).toFixed(0)} ms`;
     return;
   }
 
-  // the whole detection of the section, as the app runs it
-  t = performance.now();
-  const r = await detectSection(cv, {
-    frames, a: sec?.[0] ?? a, b: sec?.[1] ?? b, fovDeg: Number(q.get('fov') ?? 100), fovAxis: 'h',
-    map: (q.get('map') as MapId) || undefined, maps: MAPS, tiles: loadTile, mapInfo, gpu: q.get('gpu') !== '0', progress: (x) => log(`- ${x} (${ms(t)})`),
-  }, q.get('pool') === '0' ? undefined : new Pool());
-  log(`section in ${ms(t)} (${r.ms} ms), ref ${r.ref.toFixed(3)}`);
-  log(`profile ${Object.entries(r.profile ?? {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  // the whole detection of the section, as the app runs it; repeat=n runs it n times on one pool, as the app keeps
+  // its pool: the first run pays for starting the workers
+  const pool = q.get('pool') === '0' ? undefined : new Pool(Number(q.get('workers')) || undefined);
+  let r!: Awaited<ReturnType<typeof detectSection>>;
+  for (let run = 0; run < Number(q.get('repeat') ?? 1); run++) {
+    t = performance.now();
+    r = await detectSection(cv, {
+      frames, a: sec?.[0] ?? a, b: sec?.[1] ?? b, fovDeg: Number(q.get('fov') ?? 100), fovAxis: 'h',
+      map: (q.get('map') as MapId) || undefined, maps: MAPS, tiles: loadTile, mapInfo, gpu: q.get('gpu') !== '0', progress: (x) => log(`- ${x} (${ms(t)})`),
+    }, pool);
+    log(`section in ${ms(t)} (${r.ms} ms), ref ${r.ref.toFixed(3)}`);
+    log(`profile ${Object.entries(r.profile ?? {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  }
   if (q.get('v')) for (const f of r.frames) log(`  ${f.t.toFixed(3)} ${f.ok ? 'ok ' : 'BAD'} inl ${f.inliers} fit ${f.fitPx}`);
   const fmt = (d: { value?: unknown; sigma?: number; conf: number; reason?: string }, k = 2) =>
     `${typeof d.value === 'number' ? d.value.toFixed(k) : JSON.stringify(d.value)} +/-${d.sigma?.toFixed(k)} conf ${(100 * d.conf).toFixed(0)}%${d.reason ? ` (${d.reason})` : ''}`;

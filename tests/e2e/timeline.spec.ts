@@ -25,7 +25,7 @@ test('G goes to a time and to a frame', async ({ page }) => {
 
 test('a drag on the ruler selects a section that playback repeats, and Alt+X clears it', async ({ page }) => {
   const d = Number(await page.getByTestId('time').getAttribute('data-d'));
-  const ruler = page.locator('[title^="Drag to select a section"]');
+  const ruler = page.getByTestId('ruler');
   const r = (await ruler.boundingBox())!, at = (t: number) => r.x + (t / d) * r.width, y = r.y + r.height / 2;
   await page.mouse.move(at(2), y);
   await page.mouse.down();

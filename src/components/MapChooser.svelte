@@ -1,9 +1,11 @@
 <script lang="ts">
   /**
-   * Picks a map. `big` is the prompt over a view without one: the question when marking starts (automation plan
-   * section 4), with the detected map first when there is one. Otherwise it is a small select.
+   * Picks a map. With `big`, it is the prompt over a view without a map, which asks the question when marking starts
+   * (automation plan section 4) and shows the detected map first when there is one. Otherwise it is a small select.
    */
   import { MAPS } from '../lib/map/tiles.svelte.ts';
+  import Dropdown from './Dropdown.svelte';
+  import Lightbulb from '@jis3r/icons/icons/lightbulb';
   import type { Detected, MapId } from '../lib/solver/types.ts';
 
   let { value, onpick, big = false, auto, onskip, searching = false }: {
@@ -26,8 +28,9 @@
       {#if searching}<span class="text-[12px] text-muted">Looking at the minimap...</span>{:else if auto && !auto.value}<span class="text-[12px] text-muted">The minimap did not show the map clearly.</span>{/if}
       <div class="flex flex-wrap justify-center gap-2" data-testid="map-choice">
         {#each order as [id, name]}
-          <button class="btn {id === auto?.value ? 'primary' : ''}" onclick={() => onpick(id)} title={id === auto?.value ? `Found in the minimap, ${Math.round(auto.conf * 100)} percent sure` : undefined}>
-            {name}{#if id === auto?.value}{' '}<span class="text-[11px] opacity-80">auto {Math.round(auto.conf * 100)}%</span>{/if}
+          <!-- As in the select, the detected map comes first with a lightbulb, and its tooltip says how sure the detection is. -->
+          <button class="btn {id === auto?.value ? 'primary' : ''}" onclick={() => onpick(id)} title={id === auto?.value ? `Detected from the minimap, ${Math.round(auto.conf * 100)} percent sure` : undefined}>
+            {#if id === auto?.value}<Lightbulb size={13} />{/if}{name}
           </button>
         {/each}
       </div>
@@ -35,8 +38,11 @@
     </div>
   </div>
 {:else}
-  <select class="control h-8 w-full py-0 text-[11px]" aria-label="Map" bind:value={() => value ?? '', (v) => onpick((v || undefined) as MapId | undefined)}>
-    {#each Object.entries(MAPS) as [id, name]}<option value={id}>{name}{id === auto?.value ? ' (auto)' : ''}</option>{/each}
-    <option value="">No map</option>
-  </select>
+  <Dropdown full label="Map" value={(value ?? '') as MapId | ''} onchange={(v) => onpick((v || undefined) as MapId | undefined)}
+    options={[
+      // The detected map comes first, with a lightbulb, and its tooltip says how sure the detection is.
+      ...(auto?.value ? [[auto.value, MAPS[auto.value], Lightbulb, `Detected from the minimap, ${Math.round(auto.conf * 100)} percent sure`] as [MapId, string, typeof Lightbulb, string]] : []),
+      ...Object.entries(MAPS).filter(([id]) => id !== auto?.value).map(([id, name]): [MapId, string] => [id as MapId, name]),
+      ['', 'No map'],
+    ]} />
 {/if}

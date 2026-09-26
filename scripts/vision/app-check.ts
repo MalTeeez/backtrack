@@ -22,7 +22,7 @@ await page.getByTestId('settings').click();
 await page.getByTestId('fov-input').fill(process.env.FOV ?? '100');
 await page.getByTestId('settings-save').click();
 const d = Number(await page.getByTestId('time').getAttribute('data-d'));
-const ruler = page.locator('[title^="Drag to select a section"]');
+const ruler = page.getByTestId('ruler');
 const r = (await ruler.boundingBox())!, at = (t: number) => r.x + (t / d) * r.width, y = r.y + r.height / 2;
 await page.mouse.move(at(Number(a)), y);
 await page.mouse.down();

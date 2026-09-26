@@ -1,6 +1,6 @@
 /**
- * Digit templates of the compass reader (compass.ts): the mean features of each digit 0 to 9 (edges, dark ring and white fill, each on a 10 x 16 grid), and
- * the width of each digit in 2160p pixels. tools/make-compass-templates.ts writes this file from 153 frames of test-data/Clip 1 (44 s).webm.
+ * The digit templates of the compass reader (compass.ts). They hold the mean features of each digit 0 to 9 (edges,
+ * dark ring and white fill, each on a 10 x 16 grid) and the width of each digit in 2160p pixels. tools/make-compass-templates.ts writes this file from 153 frames of test-data/Clip 1 (44 s).webm.
  */
 export const ADVANCE: number[] = [17, 11, 17, 17, 17, 17, 17, 17, 17, 17];
 

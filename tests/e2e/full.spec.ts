@@ -50,6 +50,8 @@ async function moved(page: Page, act: () => Promise<void>) {
   const before = await timeText(page);
   await act();
   await expect.poll(() => timeText(page)).not.toBe(before);
+  // Firefox shows the new time before it has the new frame: a frame read then is the old one or black
+  await page.waitForFunction(() => { const v = document.querySelector('video'); return !!v && !v.seeking && v.readyState >= 2; });
   await page.waitForTimeout(60);
 }
 const now = async (page: Page) => parseFloat((await page.getByTestId('time').getAttribute('data-t'))!);

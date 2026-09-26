@@ -1,8 +1,10 @@
 <script lang="ts">
   /**
-   * Canvas map in game coordinates: craters, estimated observer positions, tracks and Monte Carlo guns, over the map
-   * imagery. The sightings layer draws the line of sight of each sighting, from where the user was on its frame to the
-   * shell on the fitted flight, colored by its miss, the walk of the user through those spots, and the minimap position. It starts on everything the result has. The wheel zooms around the pointer, a drag pans, and Fit goes back.
+   * A canvas map in game coordinates. It draws the craters, the estimated sighting positions, the tracks, and the
+   * Monte Carlo guns over the map imagery. The sightings layer draws the line of sight of each sighting, from the
+   * sighting position of its frame to the shell on the fitted flight, colored by its miss. It also draws the walk of the
+   * user through those positions and the minimap position. The view starts on everything the result has. The wheel
+   * zooms around the pointer, a drag pans, and Fit goes back.
    */
   import { compassRose, css } from '../mark/draw.ts';
   import type { ProjectResult } from '../../lib/solver/result.ts';
@@ -11,13 +13,13 @@
   import type { Grid, Id, MapId } from '../../lib/solver/types.ts';
   import { REACH, STEEP_DEG } from '../../lib/terrain/analysis.ts';
   import MapStyle from '../MapStyle.svelte';
-  import { Maximize2 } from '@lucide/svelte';
+  import Maximize2 from '@jis3r/icons/icons/maximize-2';
   import MapChooser from '../MapChooser.svelte';
   import { WEAPONS, clipInfo, clipMap, project, ui } from '../../lib/state/project.svelte.ts';
   import { value } from '../../lib/solver/field.ts';
 
   let { result, map, clipId }: { result: ProjectResult; map?: MapId; clipId: Id | null } = $props();
-  // the range of the weapon the solve used: the settings for the user's pick, else the weapon's own
+  // the range of the weapon the solve used comes from the settings for the user's pick, else from the weapon itself
   const range = $derived(project.settings.weapon ? [project.settings.rangeMinM, project.settings.rangeMaxM] : [WEAPONS[result.weapon.use].min, WEAPONS[result.weapon.use].max]);
 
   let tick = $state(0); // bumped when a map tile arrives
@@ -53,14 +55,14 @@
   const STEEP_COLOR: Color = (v) => (v !== 255 && v > STEEP_DEG ? [140, 25, 25, 120] : null);
   const LAYERS: { key: keyof typeof ui.layers; label: string; swatch: string; tip: string }[] = [
     { key: 'steep', label: 'Steep ground', swatch: 'rgb(140,25,25)', tip: `Ground steeper than ${STEEP_DEG} deg, where a gun vehicle is unlikely to stand. Hollow dots are Monte Carlo guns on such ground.` },
-    { key: 'out', label: 'Out of reach', swatch: 'rgb(40,170,80)', tip: 'Ground no shell of the gun can land on, from the terrain only (no buildings or trees).' },
-    { key: 'high', label: 'High arc only', swatch: 'rgb(235,190,40)', tip: 'Ground only the high arc of the gun lands on, with a long flight time.' },
-    { key: 'sightings', label: 'Sightings', swatch: 'var(--ok)', tip: 'The line of sight of each sighting, from where you were on its frame to the shell on the fitted flight: green within 0.1 deg of the fit, orange within 0.3 deg, red beyond. A thin line joins where you were when you walked. The hollow triangle is the minimap position.' },
+    { key: 'out', label: 'Out of reach', swatch: 'rgb(40,170,80)', tip: 'Ground that no shell of the gun can land on. The layer uses the terrain only (no buildings or trees).' },
+    { key: 'high', label: 'High arc only', swatch: 'rgb(235,190,40)', tip: 'Ground that only the high arc of the gun lands on, with a long flight time.' },
+    { key: 'sightings', label: 'Sightings', swatch: 'var(--ok)', tip: 'The line of sight of each sighting, from the sighting position of its frame to the shell on the fitted flight. Green is within 0.1 deg of the fit, orange within 0.3 deg, and red beyond. A thin line joins the sighting positions of a walk. The hollow triangle is the minimap position.' },
   ];
   /** The color of a sighting by its miss (deg) against the fit. */
   const missColor = (deg: number) => css(deg <= 0.1 ? '--ok' : deg <= 0.3 ? '--warn' : '--bad');
 
-  // only the layers the result has: steep ground needs terrain, the reach layers need the second worker message
+  // only the layers the result has. Steep ground needs terrain, and the reach layers need the second worker message.
   const shownLayers = $derived(LAYERS.filter((l) => (l.key === 'steep' ? result.shots.some((r) => r.slope) : l.key === 'sightings' ? result.shots.some((r) => r.sightings?.length) : !!result.safe)));
 
   let shown = { cx: 0, cy: 0, sc: 1 }; // the view of the last drawing, for the pointer
@@ -92,6 +94,9 @@
     ui.resultView = { span, cx: drag.cx - (e.clientX - drag.x) / shown.sc, cy: drag.cy + (e.clientY - drag.y) / shown.sc };
   }
 
+  // Whether the result has nothing to place on the map yet: no crater, gun or sighting position.
+  const empty = $derived(!result.guns.length && !result.shots.some((r) => r.C || r.gun || r.observers.length));
+
   $effect(() => {
     void theme.current, tick; // the colors come from the theme
     const W = width, H = height;
@@ -116,11 +121,7 @@
       g.font = bold; g.lineWidth = 3.5; g.strokeStyle = 'rgba(0,0,0,0.75)'; g.lineJoin = 'round';
       g.strokeText(t, x, y); g.fillStyle = '#ffffff'; g.fillText(t, x, y);
     };
-    if (!pts.length) {
-      g.fillStyle = css('--muted'); g.font = font;
-      g.fillText('The map shows here after the first result.', 14, 24);
-      return;
-    }
+    if (!pts.length) return;
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const auto = {
       cx: (Math.min(...xs) + Math.max(...xs)) / 2, cy: (Math.min(...ys) + Math.max(...ys)) / 2,
@@ -160,7 +161,7 @@
 
     const gun = css('--gun');
 
-    // the weapon range around each gun: where it can reach from there, as two labeled circles
+    // two labeled circles around each gun show where the weapon can reach from there
     const several = result.guns.length > 1;
     const gunName = (i: number) => (several ? `Gun ${i + 1}` : 'Gun');
     for (const [gi, center] of result.guns.entries()) {
@@ -194,7 +195,7 @@
         g.globalAlpha = 1; g.fillStyle = g.strokeStyle;
         g.beginPath(); g.arc(bx, by, 2.5, 0, 7); g.fill();
       }
-      // the walk: where the user was, in time order, when it moved more than a meter
+      // the walk joins the sighting positions in time order, when the user moved more than a meter
       const walk = [...ss].sort((a, b) => b.tau - a.tau), w0 = walk[0].O, w1 = walk[walk.length - 1].O;
       if (Math.hypot(w1[0] - w0[0], w1[1] - w0[1]) > 1) {
         g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 4;
@@ -226,14 +227,14 @@
           for (let a = a0; a <= a1 + 1e-9; a += Math.max(0.2, (a1 - a0) / 30)) g.lineTo(...at(a));
           g.closePath(); g.fill(); g.globalAlpha = 1;
         }
-        // the track: a dark casing under the colored dashes
+        // the track has a dark casing under the colored dashes
         g.setLineDash([10, 6]); g.lineCap = 'round';
         g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 6;
         g.beginPath(); g.moveTo(ccx, ccy); g.lineTo(...at(r.fit.th)); g.stroke();
         g.strokeStyle = gun; g.lineWidth = 3.5;
         g.beginPath(); g.moveTo(ccx, ccy); g.lineTo(...at(r.fit.th)); g.stroke(); g.setLineDash([]);
         g.fillStyle = gun; g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 1;
-        // a gun on steep ground is unlikely: a hollow dot
+        // a gun on steep ground is unlikely, so it gets a hollow dot
         for (const q of r.mc) {
           const [qx, qy] = T(q.x, q.y);
           g.beginPath(); g.arc(qx, qy, 3, 0, 7);
@@ -246,7 +247,7 @@
           g.strokeStyle = gun; g.lineWidth = 3.5; g.beginPath(); g.arc(gx, gy, 11, 0, 7); g.stroke();
         }
       }
-      // the heading of the solve, not of the project: an edit shows only with the result it gives
+      // the rose shows the heading of the solve, not of the project, so an edit shows only with the result it gives
       compassRose(g, ccx, ccy, 60, r.source);
       g.fillStyle = css('--impact'); g.strokeStyle = '#000000'; g.lineWidth = 2;
       g.beginPath(); g.arc(ccx, ccy, 8, 0, 7); g.fill(); g.stroke();
@@ -270,7 +271,8 @@
   });
 </script>
 
-<div class="relative h-full min-h-[320px] w-full" bind:clientWidth={width} bind:clientHeight={height}>
+<!-- the smallest size keeps the legend and the two stacks of controls at the bottom apart -->
+<div class="relative h-full min-h-[260px] w-full min-w-[20rem]" bind:clientWidth={width} bind:clientHeight={height}>
   <canvas
     bind:this={canvas}
     class="absolute inset-0 block touch-none {drag ? 'cursor-grabbing' : 'cursor-grab'}"
@@ -282,29 +284,37 @@
     onpointerup={() => (drag = null)}
     onpointercancel={() => (drag = null)}
   ></canvas>
+  <!-- Without a position to show, the map says so in its middle, and the legend and Fit wait for the first result. -->
+  {#if empty}
+    <p class="pointer-events-none absolute inset-0 m-0 grid place-items-center p-6 text-center text-muted">The map shows here after the first result.</p>
+  {:else}
   <div class="absolute right-2 top-2 flex max-w-[calc(100%-6rem)] flex-wrap gap-x-4 gap-y-1 border border-line bg-panel px-2.5 py-1.5 text-[11.5px] text-muted">
     <span><span class="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-impact align-[-1px]"></span>Crater</span>
-    <span><span class="mr-1 inline-block h-2.5 w-2.5 bg-accent align-[-1px]" style="clip-path: polygon(50% 0, 100% 100%, 0 100%)"></span>Where you stood (estimated)</span>
+    <span><span class="mr-1 inline-block h-2.5 w-2.5 bg-accent align-[-1px]" style="clip-path: polygon(50% 0, 100% 100%, 0 100%)"></span>Sighting position (estimated)</span>
     <span><span class="mr-1 inline-block h-0.5 w-4 bg-gun align-middle"></span>Track, gun, possible positions</span>
     <span><span class="mr-1 text-gun">X</span>Gun from its shots</span>
     <span><span class="mr-1 inline-block w-4 border-t-2 border-dashed border-gun align-middle"></span>Weapon range from the gun</span>
+    <!-- the terrain layers, each a legend entry that turns its layer on and off -->
+    {#each shownLayers as l (l.key)}
+      <button class="layer" aria-pressed={ui.layers[l.key]} title="{l.tip} Click to {ui.layers[l.key] ? 'hide' : 'show'} it." onclick={() => (ui.layers[l.key] = !ui.layers[l.key])}>
+        <span class="mr-1 inline-block h-2.5 w-2.5 align-[-1px]" style="background:{l.swatch}"></span>{l.label}
+      </button>
+    {/each}
     {#if zoom}<span>Zoom {zoom}</span>{/if}
   </div>
   <button class="btn sm absolute left-2 top-2" onclick={() => (ui.resultView = null)} disabled={!ui.resultView} title="Show the whole result"><Maximize2 size={12} /> Fit</button>
+  {/if}
   <div class="absolute bottom-2 right-2"><MapStyle /></div>
   {#if map}
     <div class="absolute bottom-2 left-2 flex w-36 flex-col gap-1">
-      <!-- the terrain layers, stacked like the map styles -->
-      {#if shownLayers.length}
-        <div class="flex flex-col gap-px border border-line bg-panel p-px" role="group" aria-label="Terrain layers">
-          {#each shownLayers as l (l.key)}
-            <button class="option min-h-0 w-full justify-start gap-1.5 px-1.5 py-1 text-[11px]" aria-pressed={ui.layers[l.key]} title={l.tip} onclick={() => (ui.layers[l.key] = !ui.layers[l.key])}>
-              <span class="inline-block h-2.5 w-2.5 shrink-0 {ui.layers[l.key] ? '' : 'opacity-30'}" style="background:{l.swatch}"></span>{l.label}
-            </button>
-          {/each}
-        </div>
-      {/if}
       <div title="Shows another map here only. The map of the clip stays."><MapChooser value={map} onpick={(m) => { if (m && m !== clipMap(clipId)) ui.mapShown.result = m; else delete ui.mapShown.result; }} /></div>
     </div>
   {:else}<MapChooser big value={undefined} auto={clipId ? project.clips[clipId]?.map.auto : undefined} onpick={(m) => { if (clipId) clipInfo(clipId).map.manual = m; }} />{/if}
 </div>
+
+<style>
+  /* A layer in the legend reads as a legend entry, and a layer that is off fades out. */
+  .layer { color: inherit; text-align: left; }
+  .layer:hover { color: var(--text); }
+  .layer[aria-pressed='false'] { opacity: 0.45; text-decoration: line-through; }
+</style>

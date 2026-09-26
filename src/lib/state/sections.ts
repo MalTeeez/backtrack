@@ -1,6 +1,6 @@
 /**
  * Writes what the detection found in a section (src/lib/vision/pipeline.ts) into the project: a sighting per shell
- * mark with automatic fields, the camera of every sighting of the shot in the section, the impact, where the user stood
+ * mark with automatic fields, the camera of every sighting of the shot in the section, the impact, the sighting position
  * and the map (automation plan sections 5.5 and 8). The user's values stay. Deterministic, without I/O.
  */
 import { confSigma, sigmaOf, value } from '../solver/field.ts';
@@ -12,16 +12,16 @@ import type { Detected, Id, ProjectData, Section, Sighting } from '../solver/typ
 /** The sigma (deg) of a camera angle the user typed for a section. */
 const TYPED_SIGMA = 0.05;
 
-/** The shell mark sigma (px) from its detection score: about 1 px for a clear blob, more for a faint one. */
+/** The shell mark sigma (px) from its detection score. It is about 1 px for a clear blob and more for a faint one. */
 export const markSigma = (score: number) => Math.min(5, Math.max(0.7, 30 / score));
 
-/** Whether the user put anything into a sighting: then a new run of the detection keeps it. */
+/** Whether the user put anything into a sighting. If so, a new run of the detection keeps it. */
 export const touched = (s: Sighting) =>
   s.shell.manual != null || s.edges.length > 0 || s.heading.manual != null || s.pitch.manual != null || s.roll.manual != null || s.zoom != null || !!s.excluded;
 
 /**
- * The camera of the frame at time t: the reference camera of the section (the user's values first) turned by the
- * rotation of the frame, each angle with the sigma of the section value and the section as its error group.
+ * The camera of the frame at time t. It is the reference camera of the section (the user's values first), turned by
+ * the rotation of the frame. Each angle gets the sigma of the section value and the section as its error group.
  */
 export function frameCameraAt(sec: Section, t: number): { h: Detected<number>; p: Detected<number>; r: Detected<number> } | null {
   const f = sec.frames.find((x) => sameFrame(x.t, t));
@@ -35,7 +35,7 @@ export function frameCameraAt(sec: Section, t: number): { h: Detected<number>; p
   return { h: of('heading', cam.h, sec.heading), p: of('pitch', cam.p, sec.pitch), r: of('roll', cam.r, sec.roll) };
 }
 
-/** Gives every sighting of the shot in the section the camera of its frame. After a run, and after the user changes the section camera. */
+/** Gives every sighting of the shot in the section the camera of its frame. It runs after a detection run and after the user changes the section camera. */
 export function applyCameras(p: ProjectData, clipId: Id, sec: Section) {
   for (const s of p.sightings) {
     if (s.clipId !== clipId || s.shotId !== sec.shotId) continue;
@@ -45,7 +45,7 @@ export function applyCameras(p: ProjectData, clipId: Id, sec: Section) {
   }
 }
 
-/** Where the walk was at time t: between its two nearest points, or at its first or last one. */
+/** Where the walk was at time t. The point lies between its two nearest points, or at its first or last one. */
 function pathAt(w: NonNullable<Section['walk']>, t: number) {
   const k = w.findIndex((p) => p.t >= t);
   if (k <= 0) return w[k < 0 ? w.length - 1 : 0];
@@ -61,7 +61,7 @@ export function applySection(p: ProjectData, clipId: Id, sec: Section, make: { u
   if (old) for (const k of ['heading', 'pitch', 'roll'] as const) if (old[k].manual != null) sec[k].manual = old[k].manual;
   clip.sections = [...(clip.sections ?? []).filter((x) => x !== old), sec];
 
-  // sightings: the marks, and no automatic sighting that the new run did not find again
+  // The sightings follow the marks. An automatic sighting that the new run did not find again goes.
   const inSection = (t: number) => t >= Math.min(sec.a, old?.a ?? sec.a) - 1e-3 && t <= Math.max(sec.b, old?.b ?? sec.b) + 1e-3;
   p.sightings = p.sightings.filter((s) => !(s.clipId === clipId && s.shotId === sec.shotId && inSection(s.timeS) && !touched(s) && !sec.marks.some((m) => sameFrame(m.t, s.timeS))));
   for (const m of sec.marks) {
@@ -73,12 +73,12 @@ export function applySection(p: ProjectData, clipId: Id, sec: Section, make: { u
     const sigma = markSigma(m.score);
     s.shell.auto = { value: { x: +m.x.toFixed(2), y: +m.y.toFixed(2) }, sigma: +sigma.toFixed(2), conf: confSigma('shell', sigma) };
   }
-  // an automatic mark on a sighting the user keeps, that the new run did not find again, goes
+  // A sighting the user keeps loses an automatic mark that the new run did not find again.
   for (const s of p.sightings) {
     if (s.clipId === clipId && s.shotId === sec.shotId && inSection(s.timeS) && s.shell.auto && !sec.marks.some((m) => sameFrame(m.t, s.timeS))) s.shell.auto = undefined;
   }
   applyCameras(p, clipId, sec);
-  // a user who walked: each sighting starts where the user was on its frame, against where they were at the impact
+  // If the user walked, each sighting gets the sighting position of its frame, relative to the one at the impact.
   const walk = sec.walk, end = walk?.[walk.length - 1];
   for (const s of p.sightings) {
     if (s.clipId !== clipId || s.shotId !== sec.shotId || !inSection(s.timeS)) continue;

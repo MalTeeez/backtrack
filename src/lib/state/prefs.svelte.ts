@@ -1,6 +1,7 @@
 /**
- * Settings of the user rather than of a project, kept in this browser: the field of view of the game, set once. The
- * project copies them (App.svelte), so the solver and the annotation files still see the FOV a solve used.
+ * Settings of the user rather than of a project, kept in this browser. They hold the field of view of the game, which
+ * the user sets once. The project copies them (App.svelte), so the solver and the annotation files still see the FOV
+ * a solve used.
  */
 
 const KEY = 'backtrack:prefs';
@@ -8,7 +9,7 @@ const KEY = 'backtrack:prefs';
 export interface Prefs {
   /** The field of view of the game (deg), and whether the game gives it horizontally or vertically. */
   fovDeg: number; fovAxis: 'h' | 'v';
-  /** The user saved the settings once; until then the header asks for them. */
+  /** True once the user saved the settings. Until then, the header asks for them. */
   saved: boolean;
 }
 

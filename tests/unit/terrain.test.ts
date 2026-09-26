@@ -75,6 +75,18 @@ describe('terrain heights', () => {
     expect(d({ ...h, observer: undefined })).toBeGreaterThan(2 * d(h));
   });
 
+  test('a walk down a slope: each sighting starts at the ground of its frame', async () => {
+    // 1.5 m/s west down a 20 percent slope that runs east-west through the spot of the user: 0.3 m lower per second
+    const O0 = makeScene().O, hill = (x: number) => 0.2 * (x - O0[0]);
+    const wt = makeScene({ ground: (x) => hill(x), walk: [-1.5, 0], craterZ: hill(makeScene().C[0]) }), data = sceneProject(wt, { n: 15, last: 3, walk: 'exact' });
+    data.shots[0].observer.clip = { manual: { x: wt.O[0] / 100, y: wt.O[1] / 100 } };
+    const h = (await terrainHeights(async (x) => hill(x * 100), data, (hh) => solveProject(data, seeded(1), 0, hh)))!;
+    const d = (hh?: typeof h) => { const g = solveProject(data, seeded(1), 0, hh).shots[0].gun!; return Math.hypot(g.x - wt.G[0], g.y - wt.G[1]); };
+    expect(Object.keys(h.walk!)).toHaveLength(15);
+    expect(d(h)).toBeLessThan(2);
+    expect(d({ ...h, walk: undefined })).toBeGreaterThan(d(h));
+  });
+
   test('a position outside the terrain data means flat ground', async () => {
     expect(await terrainHeights(async () => null, data, (hh) => solveProject(data, seeded(1), 0, hh))).toBeNull();
   });

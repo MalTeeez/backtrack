@@ -1,6 +1,6 @@
 /**
- * The impact time from the shell track (automation plan section 9, decision of 2026-09-24): the track goes on past its
- * last mark with the speed and the acceleration of its last marks, and the impact is between the last clean frame and
+ * The impact time from the shell track (automation plan section 9, decision of 2026-09-24). The track goes on past its
+ * last mark with the speed and the acceleration of its last marks. The impact lies between the last clean frame and
  * the first frame with a change around that path in the stabilized view (Appendix A.5). It needs no crater, which is
  * often hidden, and no minimap position.
  */
@@ -10,9 +10,9 @@ import { refToFrame, type Intrinsics, type Mat3 } from './rotation.ts';
 export interface ImpactFit {
   /** The last clean frame and the first changed frame (s), or null when no clear change shows. */
   a: number; b: number;
-  /** 0 to 1: how clear the change is. */
+  /** How clear the change is, from 0 to 1. */
   conf: number;
-  /** Where the impact is in the reference camera (px), and the changed share of each frame after the track. */
+  /** The impact position in the reference camera (px), and the changed share of each frame after the track. */
   at: { x: number; y: number };
   shares: { t: number; share: number }[];
   reason?: string;
@@ -25,7 +25,7 @@ const HALF = 250;
 /** A frame shows the impact when this share of the square changed, and the frame before stayed clean. */
 const SHARE_HIT = 0.05, SHARE_CLEAN = 0.02;
 
-/** Where the shell would be at time t, from its last marks (ref camera px): a parabola through the last three. */
+/** The shell position at time t (ref camera px), from a parabola through its last three marks. */
 export function extrapolate(marks: { t: number; x: number; y: number }[], t: number): { x: number; y: number } {
   const m = marks.slice(-3);
   if (m.length < 2) return { x: m[0].x, y: m[0].y };
@@ -37,15 +37,15 @@ export function extrapolate(marks: { t: number; x: number; y: number }[], t: num
     const dt = (m[2].t - m[0].t) / 2;
     acc = { x: (v.x - v0.x) / dt, y: (v.y - v0.y) / dt };
   }
-  // v is the speed in the middle of the last step: at the last mark it is half a step of acceleration more
+  // v is the speed in the middle of the last step. At the last mark, it is half a step of acceleration more.
   const h = (q.t - p.t) / 2, vx = v.x + acc.x * h, vy = v.y + acc.y * h, d = t - q.t;
   return { x: q.x + vx * d + 0.5 * acc.x * d * d, y: q.y + vy * d + 0.5 * acc.y * d * d };
 }
 
 /**
- * Scans the frames after the last mark. Each frame is compared with the one before it in the reference camera, in a
- * square around the extrapolated path. A frame without a camera (the stabilization failed: the shake of the impact)
- * compares with the camera of the last good frame.
+ * Scans the frames after the last mark. The scan compares each frame with the one before it in the reference camera,
+ * in a square around the extrapolated path. A frame without a camera (the shake of the impact made the stabilization
+ * fail) compares with the camera of the last good frame.
  */
 export function impactFromTrack(frames: { t: number; gray: Gray8; R: Mat3 | null }[], K: Intrinsics, marks: { t: number; x: number; y: number }[], maxAfterS = 1.5): ImpactFit | null {
   if (marks.length < 2) return null;
@@ -82,7 +82,7 @@ export function impactFromTrack(frames: { t: number; gray: Gray8; R: Mat3 | null
     if (!(sh >= SHARE_HIT)) continue;
     if (!(before <= SHARE_CLEAN)) return { a: NaN, b: NaN, conf: 0, at, shares, reason: 'the view changed before the shell landed' };
     const a = k ? shares[k - 1].t : from;
-    // clear: the jump is large against the frame before
+    // a clear change is a large jump against the frame before
     const conf = Math.min(1, (sh - before) / (2 * SHARE_HIT));
     return { a, b: shares[k].t, conf, at: centerAt(shares[k].t), shares };
   }

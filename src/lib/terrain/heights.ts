@@ -1,6 +1,7 @@
 /**
- * Ground heights for a project from terrain data (docs/terrain-plan.md). The craters sample the terrain directly. The gun height depends on the gun position, which the solve finds: the loop solves with a gun height,
- * samples the terrain at the gun, and solves again, until the height changes by less than 0.5 m (at most 4 rounds).
+ * Ground heights for a project from terrain data (docs/terrain-plan.md). The craters sample the terrain directly. The
+ * gun height depends on the gun position, which the solve finds. Thus the loop solves with a gun height, samples the
+ * terrain at the gun, and solves again, until the height changes by less than 0.5 m (at most 4 rounds).
  */
 import { GAME_UNIT_M, anchorGame, observerGame } from '../solver/sightings.ts';
 import type { ProjectResult } from '../solver/result.ts';
@@ -9,9 +10,9 @@ import type { Heights, ProjectData } from '../solver/types.ts';
 /** The ground height (m) at a game point, or null without data there. */
 export type Ground = (x: number, y: number) => Promise<number | null>;
 
-/** Null when a crater has no terrain data: the solve then keeps flat ground for everything. */
+/** Null when a crater has no terrain data. The solve then keeps flat ground for everything. */
 export async function terrainHeights(ground: Ground, data: ProjectData, solve: (h: Heights) => ProjectResult): Promise<Heights | null> {
-  const h: Heights = { crater: {}, gun: {}, observer: {} };
+  const h: Heights = { crater: {}, gun: {}, observer: {}, walk: {} };
   for (const shot of data.shots) {
     const c = anchorGame(shot);
     if (!c) continue;
@@ -23,7 +24,7 @@ export async function terrainHeights(ground: Ground, data: ProjectData, solve: (
   }
   for (let round = 0; round < 4; round++) {
     let moved = 0;
-    // the solved spots: where the user stood, and the crater when only the user's spot was known
+    // The solve refines the sighting position, and the crater when only the sighting position was known.
     const refine = async (key: 'observer' | 'crater', id: string, p?: number[]) => {
       const z = p && (await ground(p[0] / GAME_UNIT_M, p[1] / GAME_UNIT_M));
       if (z == null) return;
@@ -32,6 +33,13 @@ export async function terrainHeights(ground: Ground, data: ProjectData, solve: (
     };
     for (const r of solve(h).shots) {
       await refine('observer', r.shotId, r.observers[0]);
+      // For a walk, each frame gets the height of its ground relative to the ground at the impact.
+      const o = r.observers[0], z0 = h.observer![r.shotId];
+      if (o) for (const s of data.sightings) {
+        if (s.shotId !== r.shotId || !s.walkM) continue;
+        const z = await ground((o[0] + s.walkM[0]) / GAME_UNIT_M, (o[1] + s.walkM[1]) / GAME_UNIT_M);
+        if (z != null) h.walk![s.id] = z - z0;
+      }
       if (r.crater) await refine('crater', r.shotId, r.C);
       if (!r.gun) continue;
       const z = await ground(r.gun.x / GAME_UNIT_M, r.gun.y / GAME_UNIT_M);

@@ -1,14 +1,14 @@
 /**
- * Rotation math for the stabilization (automation plan section 5 and Appendix A.1). Camera axes: x right, y down,
- * z forward. A frame's rotation R maps bearings of the reference camera to its own: b_frame = R * b_ref. Matrices are
- * row-major arrays of 9. Deterministic, without I/O.
+ * Rotation math for the stabilization (automation plan section 5 and Appendix A.1). The camera axes are x right,
+ * y down and z forward. A frame's rotation R maps bearings of the reference camera to its own, as b_frame = R * b_ref.
+ * Matrices are row-major arrays of 9. Deterministic, without I/O.
  */
 import { cameraAxes, D2R, R2D, wrap360 } from '../solver/camera.ts';
 
 export type Mat3 = number[]; // row-major 3x3
 export type V3 = [number, number, number];
 
-/** The pinhole camera of a frame: focal length and principal point in pixels. */
+/** The pinhole camera of a frame, with the focal length and principal point in pixels. */
 export interface Intrinsics { f: number; cx: number; cy: number }
 
 export const bearing = (K: Intrinsics, x: number, y: number): V3 => {
@@ -68,8 +68,8 @@ export function eigenSym(A: number[], n: number): { values: number[]; vectors: n
 }
 
 /**
- * The rotation R that best maps the bearings a onto b (b = R a), by weighted least squares: Horn's closed form with
- * quaternions, the same as Kabsch.
+ * The rotation R that best maps the bearings a onto b (b = R a), by weighted least squares. It uses Horn's closed form
+ * with quaternions, which gives the same result as Kabsch.
  */
 export function fitRotation(a: V3[], b: V3[], w?: number[]): Mat3 {
   const S = new Array(9).fill(0);
@@ -99,15 +99,15 @@ export function axisAngle(axis: V3, deg: number): Mat3 {
 }
 
 /**
- * The world orientation of a camera: columns right, down and forward in world coordinates (X east, Y north, Z up),
- * as rayWorld in camera.ts.
+ * The world orientation of a camera, with the columns right, down and forward in world coordinates (X east, Y north,
+ * Z up), as rayWorld in camera.ts.
  */
 export function cameraToWorld(headingDeg: number, pitchDeg: number, rollDeg: number): Mat3 {
   const { R, U, F } = cameraAxes(headingDeg, pitchDeg, rollDeg);
   return [R[0], -U[0], F[0], R[1], -U[1], F[1], R[2], -U[2], F[2]];
 }
 
-/** Heading, pitch and roll (deg) of a camera from its world orientation (the inverse of cameraToWorld). */
+/** The heading, pitch and roll (deg) of a camera from its world orientation (the inverse of cameraToWorld). */
 export function anglesOf(M: Mat3): { h: number; p: number; r: number } {
   const F: V3 = [M[2], M[5], M[8]], Rt: V3 = [M[0], M[3], M[6]];
   const h = wrap360(Math.atan2(F[0], F[1]) * R2D), p = Math.asin(Math.max(-1, Math.min(1, F[2]))) * R2D;
@@ -116,15 +116,15 @@ export function anglesOf(M: Mat3): { h: number; p: number; r: number } {
   return { h, p, r };
 }
 
-/** The camera of frame i: the reference camera turned by the frame's rotation (A.1: M_ref * R_i^T). */
+/** The camera of frame i, which is the reference camera turned by the frame's rotation (A.1, M_ref * R_i^T). */
 export const frameCamera = (Mref: Mat3, Ri: Mat3) => anglesOf(mul(Mref, T(Ri)));
 
-/** The homography that maps frame pixels to the reference camera: K R^T K^-1. */
+/** The homography K R^T K^-1, which maps frame pixels to the reference camera. */
 export function toRef(K: Intrinsics, R: Mat3): number[] {
   const Km = [K.f, 0, K.cx, 0, K.f, K.cy, 0, 0, 1], Ki = [1 / K.f, 0, -K.cx / K.f, 0, 1 / K.f, -K.cy / K.f, 0, 0, 1];
   return mul(mul(Km, T(R)), Ki);
 }
-/** A pixel of the reference camera in frame i: K R K^-1 p. */
+/** Maps a pixel p of the reference camera into frame i, as K R K^-1 p. */
 export function refToFrame(K: Intrinsics, R: Mat3, p: { x: number; y: number }) {
   const v = apply(R, bearing(K, p.x, p.y));
   return { x: K.cx + (K.f * v[0]) / v[2], y: K.cy + (K.f * v[1]) / v[2] };

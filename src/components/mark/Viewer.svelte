@@ -2,12 +2,14 @@
   /**
    * The video itself, as large as the space allows. A transparent canvas on it takes the pointer, and the marks and
    * labels go on a second canvas over the whole box at screen resolution, so they stay sharp at any zoom.
-   * The <video> element must be on the page: Chrome stops decoding a playing video that nobody can see. A press on a
-   * mark drags it, and a press anywhere else places a point with the active tool. The wheel zooms into the video
-   * around the pointer, and a right drag (or a left drag without a tool) pans. A middle click locks the magnifier.
+   * The <video> element must be on the page, because Chrome stops decoding a playing video that nobody can see. A
+   * press on a mark drags it, and a press anywhere else places a point with the active tool. The wheel zooms into the
+   * video around the pointer, and a right drag (or a left drag without a tool) pans. A middle click locks the
+   * magnifier.
    */
-  import { Maximize2 } from '@lucide/svelte';
+  import Maximize2 from '@jis3r/icons/icons/maximize-2';
   import type { Pt, Sighting } from '../../lib/solver/types.ts';
+  import { player } from '../../lib/state/player.svelte.ts';
   import { drawDetection, drawMarks, drawNotes, hitMark, type DetectionView, type Handle, type MarkTarget, type Note, type NoteBox } from './draw.ts';
 
   let {
@@ -16,9 +18,9 @@
     video: HTMLVideoElement; frame: number; sighting: Sighting | undefined; pending: Pt | null; tool: boolean;
     /** Sightings of other shots on this frame, drawn faded. */
     others: Sighting[];
-    /** Guide lines, drawn dashed: the vertical lines the detection took the pitch from. */
+    /** Guide lines, drawn dashed. They are the vertical lines that the detection took the pitch from. */
     copied: [Pt, Pt][];
-    /** This frame is the impact of a shot: the viewer gets a red frame. */
+    /** Whether this frame is the impact of a shot. If it is, the viewer gets a red frame. */
     impact: boolean;
     /** What the detection used and found on this frame, drawn under the marks. */
     detection?: DetectionView | null;
@@ -26,7 +28,7 @@
     onmiddle: (p: Pt) => void; onremove: (t: MarkTarget) => void;
   } = $props();
 
-  // the zoom: a scale and the screen offset of the video, applied as a CSS transform. The canvas moves with the
+  // The zoom is a scale and the screen offset of the video, applied as a CSS transform. The canvas moves with the
   // video, so its bounding box still maps the pointer to video pixels.
   let zoom = $state({ k: 1, ox: 0, oy: 0 });
   let pan: { x: number; y: number; ox: number; oy: number } | null = $state(null);
@@ -35,7 +37,7 @@
   function setZoom(k: number, ox: number, oy: number) {
     ox = Math.max(size.w * (1 - k), Math.min(0, ox));
     oy = Math.max(size.h * (1 - k), Math.min(0, oy));
-    // no update at the cap: the wheel handler must stay cheap, or Firefox scrolls the page before it answers
+    // At the cap, nothing updates. The wheel handler must stay cheap, or Firefox scrolls the page before it answers.
     if (k === zoom.k && ox === zoom.ox && oy === zoom.oy) return;
     zoom = { k, ox, oy };
   }
@@ -85,10 +87,21 @@
   const sizeKey = $derived(`${size.w}x${size.h}`); // a string, because size is a new object on every frame
   $effect(() => { void sizeKey; zoom = { k: 1, ox: 0, oy: 0 }; });
 
+  // the width of the video on the screen, for the size of the frames the player keeps for its steps
+  $effect(() => { if (size.w) player.viewPx = Math.round(size.w * (window.devicePixelRatio || 1)); });
+  const drawPreview = (c: HTMLCanvasElement) => {
+    $effect(() => {
+      const p = player.preview;
+      if (!p) return;
+      if (c.width !== p.bmp.width || c.height !== p.bmp.height) { c.width = p.bmp.width; c.height = p.bmp.height; }
+      c.getContext('2d')!.drawImage(p.bmp, 0, 0);
+    });
+  };
   const mount = (node: HTMLElement) => {
     Object.assign(video.style, { position: 'absolute', inset: '0', width: '100%', height: '100%' });
     node.prepend(video);
-    return () => video.remove();
+    // the video may already sit in the viewer of the next page
+    return () => { if (video.parentNode === node) video.remove(); };
   };
 
   // the pointer canvas keeps the size of the video, so its box maps the pointer to video pixels
@@ -98,8 +111,8 @@
     if (w && (canvas.width !== w || canvas.height !== h)) { canvas.width = w; canvas.height = h; }
   });
 
-  // the marks and labels, on the overlay at screen resolution: a video point goes through the fit, the pan and the
-  // zoom to its place on screen, and lines and text keep their screen size
+  // The marks and labels go on the overlay at screen resolution. A video point goes through the fit, the pan and the
+  // zoom to its place on screen, and lines and text keep their screen size.
   $effect(() => {
     void frame;
     const w = video.videoWidth, dpr = window.devicePixelRatio || 1;
@@ -108,7 +121,8 @@
     const g = over.getContext('2d')!;
     g.clearRect(0, 0, W, H);
     if (!w || !size.w) return;
-    const sc = (size.w / w) * zoom.k, left = inner.offsetLeft + zoom.ox, top = inner.offsetTop + zoom.oy;
+    // The video sits in the middle of the box (place-items-center), so its offset needs no layout of the page.
+    const sc = (size.w / w) * zoom.k, left = (boxW - size.w) / 2 + zoom.ox, top = (boxH - size.h) / 2 + zoom.oy;
     const T = (p: Pt): Pt => ({ x: (left + p.x * sc) * dpr, y: (top + p.y * sc) * dpr });
     const lw = 1.25 * dpr;
     if (detection) drawDetection(g, detection, T, dpr, w, video.videoHeight);
@@ -122,7 +136,7 @@
     }
     drawMarks(g, sighting, pending, T, lw, active);
     if (lock) {
-      // the locked magnifier spot: 30 video pixels
+      // The locked magnifier spot covers 30 video pixels.
       const a = T({ x: lock.x - 15, y: lock.y - 15 }), b = T({ x: lock.x + 15, y: lock.y + 15 });
       g.strokeStyle = '#ffffff'; g.lineWidth = lw; g.setLineDash([4 * lw, 3 * lw]);
       g.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
@@ -185,6 +199,8 @@
     style="width:{size.w}px; height:{size.h}px; transform:translate({zoom.ox}px, {zoom.oy}px) scale({zoom.k}); will-change:transform"
     {@attach mount}
   >
+    <!-- the preview of the frame a seek goes to, over the video until the video shows it (player.svelte.ts) -->
+    <canvas class="pointer-events-none absolute inset-0 block h-full w-full" hidden={!player.preview} {@attach drawPreview}></canvas>
     <canvas
       bind:this={canvas}
       class="absolute inset-0 block h-full w-full touch-none {pan ? 'cursor-grabbing' : active ? 'cursor-move' : tool ? 'cursor-crosshair' : zoom.k > 1 ? 'cursor-grab' : ''}"
@@ -197,7 +213,7 @@
       onmousedown={(e) => { if (e.button === 1) e.preventDefault(); }}
       oncontextmenu={(e) => e.preventDefault()}
     ></canvas>
-    <!-- on the impact frame, a red frame on the video itself; it zooms with the video, so its width divides by the zoom -->
+    <!-- The impact frame gets a red frame on the video itself. It zooms with the video, so its width divides by the zoom. -->
     {#if impact}<div class="pointer-events-none absolute inset-0 border-[#e5484d]" style="border-width:{4 / zoom.k}px" data-testid="impact-frame"></div>{/if}
   </div>
   <canvas bind:this={over} class="pointer-events-none absolute inset-0 block h-full w-full"></canvas>

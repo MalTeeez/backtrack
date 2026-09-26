@@ -1,16 +1,16 @@
 /**
- * Stabilization (automation plan section 5, Appendix A.1): the rotation of each frame of a section against a
+ * The stabilization (automation plan section 5, Appendix A.1) finds the rotation of each frame of a section against a
  * reference frame, with a rotation-only camera model. OpenCV.js has no SIFT, so ORB finds the matches at half size
  * (section 5.1 allows it), and pyramidal Lucas-Kanade moves the matched points of the world to subpixel positions
  * before the final fit.
  *
  * Several motions share a frame: the world, the viewmodel (hands, weapon) and the HUD (which stands still). A RANSAC
- * over rotations finds up to three models; the world is the one highest in the frame among those with a fair share of
+ * over rotations finds up to three models. The world is the one highest in the frame among those with a fair share of
  * the matches (the hands sit low). HUD points (still in frames where the world turns) drop out of the features for a
  * second pass. A frame with few matches to the reference also chains through its neighbor.
  *
- * The work per frame (features, and the rotation against another frame) are pure tasks: a Runner does them in this
- * thread or spreads them over a pool of workers (pool.ts).
+ * The work per frame (the features, and the rotation against another frame) is deterministic and without I/O. A Runner
+ * does it in this thread or spreads it over a pool of workers (pool.ts).
  */
 import { using, type CV } from './cv.ts';
 import { fixedMask } from './hud.ts';
@@ -24,16 +24,19 @@ export interface StabFrame {
   t: number;
   /** b_frame = R b_ref. Null when the frame has no world model. */
   R: Mat3 | null;
-  /** Inliers of the world model after the refinement, and their RMS miss (px at full size). */
+  /** The inliers of the world model after the refinement, and their RMS miss (px at full size). */
   inliers: number;
   fitPx: number;
-  /** Inliers of every model found: the world first. */
+  /** The inliers of every model found, with the world first. */
   models: number[];
   /** The frame came through a neighbor, not directly from the reference. */
   chained: boolean;
-  /** Good enough to use: at least 50 inliers, and the rotation known to 0.1 px (its fit error over the root of the inliers). */
+  /**
+   * The frame is good enough to use, with at least 50 inliers and the rotation known to 0.1 px (its fit error over the
+   * root of the inliers).
+   */
   ok: boolean;
-  /** Matched points of the world and of the other models, in frame pixels at full size, for the overlays. */
+  /** The matched points of the world and of the other models, in frame pixels at full size, for the overlays. */
   world?: Float32Array;
   other?: Float32Array;
 }
@@ -47,13 +50,13 @@ export interface Stabilization {
 
 export const MIN_INLIERS = 50;
 /**
- * The largest standard error of a rotation (px): the fit error over the root of the inliers. The plan proposes a fit
- * error of 1 px (section 2.2); on the 4K test clips, compression gives good frames of 300 inliers a fit of 1.1 to
+ * The largest standard error of a rotation (px), which is the fit error over the root of the inliers. The plan proposes
+ * a fit error of 1 px (section 2.2). On the 4K test clips, compression gives good frames of 300 inliers a fit of 1.1 to
  * 1.3 px, whose rotation is still known to 0.07 px.
  */
 export const MAX_ROTATION_PX = 0.1;
 const good = (inliers: number, fitPx: number) => inliers >= MIN_INLIERS && fitPx / Math.sqrt(inliers) <= MAX_ROTATION_PX;
-/** A model that turns less than this (deg) stands still: HUD, or a camera at rest. */
+/** A model that turns less than this (deg) stands still, like the HUD or a camera at rest. */
 const STILL_DEG = 0.01;
 const NFEATURES = 4000;
 
@@ -83,7 +86,7 @@ function withoutHud(f: Feats, hud: number[][], r = 12): Feats {
   return { pts, desc, n: keep.length };
 }
 
-/** Matches a to b: pairs of indices that pass the ratio test. */
+/** Matches a to b, and returns the pairs of indices that pass the ratio test. */
 function match(cv: CV, a: Feats, b: Feats, ratio = 0.8): [number, number][] {
   if (!a.n || !b.n) return [];
   return using((keep) => {
@@ -130,8 +133,8 @@ export function ransacModels(a: V3[], b: V3[], thrDeg: number, rng: Rng, count =
 }
 
 /**
- * The world among the models: of the models with a fair share of the matches, the one highest in the frame (the
- * prototype rule). The hands and the weapon sit low, and a model of a few HUD points does not count.
+ * Picks the world among the models. Of the models with a fair share of the matches, the world is the one highest in
+ * the frame (the prototype rule). The hands and the weapon sit low, and a model of a few HUD points does not count.
  */
 function pickWorld(models: Model[], ys: (i: number) => number): Model | null {
   const most = Math.max(0, ...models.map((m) => m.inl.length));
@@ -142,14 +145,15 @@ function pickWorld(models: Model[], ys: (i: number) => number): Model | null {
 /** The rotation of one frame against another, and what the other models show (for the HUD and the overlays). */
 export interface Relative {
   R: Mat3; inliers: number; fitPx: number; models: number[];
-  /** Indices of the features of frame j that stand still in another model. */
+  /** The indices of the features of frame j that stand still in another model. */
   still: number[];
   world: Float32Array; other: Float32Array;
 }
 
 /**
- * The rotation of frame i against frame j (b_i = R b_j): ORB matches, the world model by RANSAC, and a refit on its
- * points moved to subpixel positions by Lucas-Kanade. `f` is the focal length at full size, for the fit in pixels.
+ * The rotation of frame i against frame j (b_i = R b_j). It finds the ORB matches and the world model by RANSAC, then
+ * refits on the world points that Lucas-Kanade moved to subpixel positions. `f` is the focal length at full size, for
+ * the fit in pixels.
  */
 export function relative(cv: CV, fj: Feats, fi: Feats, gj: Gray8, gi: Gray8, Kh: Intrinsics, f: number, seed: number): Relative | null {
   const rng = seeded(seed);
@@ -169,7 +173,7 @@ export function relative(cv: CV, fj: Feats, fi: Feats, gj: Gray8, gi: Gray8, Kh:
   };
 }
 
-/** Does the work per frame: here (localRunner) or in a pool of workers (pool.ts). */
+/** Does the work per frame, here (localRunner) or in a pool of workers (pool.ts). */
 export interface StabRunner {
   /** The features of each half-size frame. */
   features(halves: Gray8[]): Promise<Feats[]>;
@@ -185,7 +189,7 @@ export const localRunner = (cv: CV): StabRunner => ({
 export const seedOf = (i: number, j: number) => 1 + i * 7919 + j * 104729;
 
 export interface StabOptions {
-  /** The frames (first and last index) the reference may come from: the section. Frames around it chain in. */
+  /** The frames (first and last index) of the section, which the reference may come from. Frames around it chain in. */
   section?: [number, number];
 }
 
@@ -193,8 +197,9 @@ export interface StabOptions {
 const CHAIN_BELOW = 150;
 
 /**
- * The rotation of every frame against the reference: the frame of the section with the most features. The first pass
- * finds the HUD: points that stand still in frames where the world turns. The second pass leaves them out.
+ * Finds the rotation of every frame against the reference, which is the frame of the section with the most features.
+ * The first pass finds the HUD, the points that stand still in frames where the world turns. The second pass leaves
+ * them out.
  */
 export async function stabilize(run: StabRunner, frames: { t: number; gray: Gray8 }[], K: Intrinsics, o: StabOptions = {}): Promise<Stabilization> {
   const halves = timed('stab: half size', () => frames.map((f) => half(f.gray)));
@@ -209,7 +214,7 @@ export async function stabilize(run: StabRunner, frames: { t: number; gray: Gray
   return (await pass(run, frames, halves, feats, ref, K, Kh)).result;
 }
 
-/** One pass: every frame against the reference (in parallel), then the chains where that is weak. */
+/** One pass matches every frame against the reference (in parallel), then runs the chains where that match is weak. */
 async function pass(run: StabRunner, frames: { t: number }[], halves: Gray8[], feats: Feats[], ref: number, K: Intrinsics, Kh: Intrinsics) {
   const out: StabFrame[] = frames.map((f) => ({ t: f.t, R: null, inliers: 0, fitPx: Infinity, models: [], chained: false, ok: false }));
   out[ref] = { ...out[ref], R: I3, inliers: feats[ref].n, fitPx: 0, models: [feats[ref].n], ok: true };
@@ -227,8 +232,9 @@ async function pass(run: StabRunner, frames: { t: number }[], halves: Gray8[], f
     set(i, r, false);
     if (rotationAngle(r.R) > 0.1) { turning++; for (const k of r.still) stillCount.set(k, (stillCount.get(k) ?? 0) + 1); }
   }
-  // a weak frame chains through its neighbor toward the reference: every such pair at once, then outward from the
-  // reference so each neighbor has its rotation; a neighbor that is not good sends the frame to the next good one
+  // a weak frame chains through its neighbor toward the reference. All such pairs run at once, then the results apply
+  // outward from the reference, so each neighbor has its rotation. A neighbor that is not good sends the frame to the
+  // next good one.
   const order = [...Array.from({ length: frames.length - ref - 1 }, (_, k) => ref + 1 + k), ...Array.from({ length: ref }, (_, k) => ref - 1 - k)];
   const toward = (i: number) => (i > ref ? i - 1 : i + 1);
   const weak = order.filter((i) => !((byFrame.get(i)?.inliers ?? 0) >= CHAIN_BELOW) && toward(i) !== ref);

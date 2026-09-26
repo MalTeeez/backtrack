@@ -1,8 +1,8 @@
 <script lang="ts">
   /**
-   * The stabilized view (automation plan section 5.4): the frame on screen warped into the reference camera of the
-   * detection, with WebGL, so the world stands still and the shell moves as the solver sees it. Overlays: the shell
-   * track of the section with the mark of this frame, the vertical lines of the pitch, and where the shell lands.
+   * The stabilized view (automation plan section 5.4) warps the frame on screen into the reference camera of the
+   * detection with WebGL, so the world stands still and the shell moves as the solver sees it. The overlays show the
+   * shell track of the section with the mark of this frame, the vertical lines of the pitch, and where the shell lands.
    */
   import { focalPx } from '../../lib/solver/camera.ts';
   import { toRef } from '../../lib/vision/rotation.ts';
@@ -28,7 +28,7 @@
   const VS = `#version 300 es
   in vec2 p; out vec2 uv;
   void main() { uv = (p + 1.0) * 0.5; uv.y = 1.0 - uv.y; gl_Position = vec4(p, 0.0, 1.0); }`;
-  // the reference pixel of this fragment, through H into the frame, and the video there
+  // The fragment maps its reference pixel through H into the frame and samples the video there.
   const FS = `#version 300 es
   precision highp float;
   in vec2 uv; out vec4 color;
@@ -42,6 +42,7 @@
 
   function setup(c: HTMLCanvasElement) {
     gl = c.getContext('webgl2', { preserveDrawingBuffer: false });
+    texFrame = -1; // a new context has no texture yet
     if (!gl) return;
     const sh = (type: number, src: string) => { const s = gl!.createShader(type)!; gl!.shaderSource(s, src); gl!.compileShader(s); return s; };
     prog = gl.createProgram()!;
@@ -60,17 +61,31 @@
     return () => { gl = null; };
   }
 
-  // each new picture: the warp, then the overlay in reference pixels
+  // A view in a window behind another tab (the body has the class off) draws nothing, and draws again when it shows.
+  let shown = $state(true);
+  $effect(() => {
+    const body = box?.closest('.body');
+    if (!body) return;
+    const update = () => (shown = !body.classList.contains('off'));
+    update();
+    const watch = new MutationObserver(update);
+    watch.observe(body, { attributes: true, attributeFilter: ['class'] });
+    return () => watch.disconnect();
+  });
+  // The frame in the texture. A new size draws again from it, so only a new frame uploads the picture.
+  let texFrame = -1;
+
+  // Each new picture draws the warp, then the overlay in reference pixels.
   $effect(() => {
     void frame;
     const w = video.videoWidth, h = video.videoHeight;
-    if (!gl || !prog || !canvas || !over || !w || !size.w) return;
+    if (!shown || !gl || !prog || !canvas || !over || !w || !size.w) return;
     const dpr = window.devicePixelRatio || 1;
     for (const c of [canvas, over]) { if (c.width !== Math.round(size.w * dpr)) { c.width = Math.round(size.w * dpr); c.height = Math.round(size.h * dpr); } }
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.useProgram(prog);
-    if (video.readyState >= 2) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
-    // without a rotation for this frame, the frame as it is
+    if (video.readyState >= 2 && texFrame !== frame) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video); texFrame = frame; }
+    // Without a rotation for this frame, the view shows the frame as it is.
     const Hm = R ? invert(toRef(K, R)) : [1, 0, 0, 0, 1, 0, 0, 0, 1];
     gl.uniformMatrix3fv(gl.getUniformLocation(prog, 'H'), false, [Hm[0], Hm[3], Hm[6], Hm[1], Hm[4], Hm[7], Hm[2], Hm[5], Hm[8]]);
     gl.uniform2f(gl.getUniformLocation(prog, 'size'), w, h);
@@ -110,6 +125,6 @@
     <canvas bind:this={over} class="pointer-events-none absolute inset-0 h-full w-full"></canvas>
   </div>
   <span class="pointer-events-none absolute left-2 top-2 border border-line bg-panel px-1.5 text-[11px] text-muted">
-    {#if !section}Stabilized: no detection for this shot yet{:else if !R}Stabilized: this frame has no rotation{:else}Stabilized to {section.ref.toFixed(3)} s{/if}
+    {#if !section}Stabilized view without a detection for this shot{:else if !R}Stabilized view without a rotation for this frame{:else}Stabilized to {section.ref.toFixed(3)} s{/if}
   </span>
 </div>

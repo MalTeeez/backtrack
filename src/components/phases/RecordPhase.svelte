@@ -8,7 +8,8 @@
   // module scope keeps the buffer recording while the user is in another phase
   const status = $state({ active: false, seconds: 0, note: '', error: '' });
 
-  // capture test (docs/capture-test-plan.md), for example ?codec=vp8&res=1920x1080&fps=30&hint=detail
+  // the capture test (docs/capture-test-plan.md) reads its settings from the URL, for example
+  // ?codec=vp8&res=1920x1080&fps=30&hint=detail
   const q = new URLSearchParams(location.search);
   const CODECS: Record<string, string> = {
     vp8: 'video/webm;codecs=vp8', vp9: 'video/webm;codecs=vp9', av1: 'video/webm;codecs=av01', h264: 'video/mp4;codecs=avc1',
@@ -48,22 +49,45 @@
 </script>
 
 <script lang="ts">
-  import { Circle, Download, Save, Square, Trash2, Upload } from '@lucide/svelte';
+  import Download from '@jis3r/icons/icons/download';
+  import Trash2 from '@jis3r/icons/icons/trash-2';
+  import Upload from '@jis3r/icons/icons/upload';
+  import Checkbox from '../Checkbox.svelte';
+  import { Circle, Save, Square } from '@lucide/svelte';
   import { applyAnnotation, baseName, downloadClip, isAnnotationFile, readAnnotation } from '../../lib/capture/clipFiles.ts';
   import NumInput from '../NumInput.svelte';
   import Spinner from '../Spinner.svelte';
   import { canCapture } from '../../lib/capture/rollingRecorder.ts';
   import { deleteClip, dropClipUrl, renameClip } from '../../lib/state/persistence.ts';
   import { forgetClip, newShot, uid } from '../../lib/state/project.svelte.ts';
-  import { forgetStrip } from '../mark/Timeline.svelte';
+  import { forgetFrames } from '../../lib/video/frameCache.svelte.ts';
   import { clipThumb, forgetThumb } from '../../lib/video/clipThumbs.svelte.ts';
   import { clearHistory } from '../../lib/state/history.svelte.ts';
   import type { ClipMeta } from '../../lib/solver/types.ts';
+  import Timecode from '../Timecode.svelte';
 
   const st = $derived(project.settings); // undo replaces the settings object
   let over = $state(false);
   let busy = $state(0);
   let confirmDelete: string | null = $state(null);
+
+  // The clips picked together for Setup, in the order of the list. A click on a checkbox toggles its clip, and a Shift
+  // click picks or drops the range from the clip clicked last.
+  const picked = $derived(clips.list.filter((c) => ui.clipIds.includes(c.id)).map((c) => c.id));
+  let lastPick = -1;
+  function pick(i: number, e: MouseEvent) {
+    const id = clips.list[i].id, on = !picked.includes(id);
+    const range = e.shiftKey && lastPick >= 0 ? clips.list.slice(Math.min(lastPick, i), Math.max(lastPick, i) + 1).map((c) => c.id) : [id];
+    const next = on ? new Set([...picked, ...range]) : new Set(picked.filter((x) => !range.includes(x)));
+    ui.clipIds = clips.list.filter((c) => next.has(c.id)).map((c) => c.id);
+    lastPick = i;
+  }
+  /** Opens Setup with a batch of clips, the first on screen. */
+  function setUp(ids: string[]) {
+    ui.clipIds = ids;
+    ui.clipId = ids[0];
+    ui.phase = 'setup';
+  }
   const captureOk = canCapture();
   $effect(() => { rec.bufferS = st.bufferS; rec.bitrateMbps = st.bitrateMbps; });
 
@@ -111,7 +135,8 @@
       for (const f of list.filter(isAnnotationFile)) {
         try {
           const a = await readAnnotation(f);
-          // by the file name first, else by the clip name the file records. Several clips of that name: no guess.
+          // the file matches by its file name first, else by the clip name it records. With several clips of that name,
+          // it does not guess.
           const byName = (list: ClipMeta[], same: (c: ClipMeta) => boolean) => {
             const hits = list.filter(same);
             if (hits.length > 1) throw new Error(`${f.name} fits ${hits.length} clips named ${a.clip.name}. Rename the clips, or upload the file together with its video.`);
@@ -123,7 +148,7 @@
           if (!clip) throw new Error(`${f.name} has no video. Upload it together with ${a.clip.name}.`);
           if (added.has(baseName(f.name).toLowerCase()) && clip.name !== a.clip.name) rename(clip, a.clip.name);
           notes.push(...applyAnnotation(project, clip.id, a, { uid, shot: newShot }, clip));
-          notes.push(`${f.name}: ${a.sightings.length} sighting(s) added to ${clip.name}.`);
+          notes.push(`${f.name} added ${a.sightings.length} ${a.sightings.length === 1 ? 'sighting' : 'sightings'} to ${clip.name}.`);
         } catch (e) {
           errors.push((e as Error).message);
         }
@@ -143,7 +168,7 @@
   async function remove(c: ClipMeta) {
     await deleteClip(c.id);
     dropClipUrl(c.id);
-    forgetStrip(c.id);
+    forgetFrames(c.id);
     forgetThumb(c.id);
     clearHistory();
     forgetClip(c.id);
@@ -163,7 +188,6 @@
   const uses = (id: string) => project.sightings.filter((s) => s.clipId === id).length;
   /** A file size in MB, or in kB below 1 MB. */
   const fmtBytes = (b: number) => (b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} kB`);
-  const fmtLen = (s: number) => (Number.isFinite(s) ? `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}` : '-');
 </script>
 
 <div class="grid h-full min-h-0 gap-2 lg:grid-cols-[minmax(340px,440px)_minmax(0,1fr)]">
@@ -204,7 +228,7 @@
       <header class="card-head"><h2 class="card-title">Upload</h2></header>
       <div class="card-body flex flex-1 flex-col gap-2">
         <label
-          title="WebM or MP4, from Game Bar, OBS, ShadowPlay or ReLive. Add a .backtrack.json file to import its marks. The videos stay on this computer."
+          title="Upload WebM or MP4 from Game Bar, OBS, ShadowPlay or ReLive. Add a .backtrack.json file to import its marks. The videos stay on this computer."
           class="drop flex-1"
           class:is-over={over}
           ondragover={(e) => { e.preventDefault(); over = true; }}
@@ -224,31 +248,36 @@
       <h2 class="card-title">Clips</h2>
       <span class="card-meta">
         kept in this browser
-        {#if clips.list.length}<button class="btn sm" onclick={downloadAll} title="Each clip as its video, and its marks as a .backtrack.json file"><Download size={12} /> Download all</button>{/if}
+        {#if picked.length}<button class="btn sm primary" onclick={() => setUp(picked)} data-testid="setup-picked">Set up {picked.length} {picked.length === 1 ? 'clip' : 'clips'}</button>{/if}
+        {#if clips.list.length}<button class="btn sm" onclick={downloadAll} title="Downloads each clip as its video, and its marks as a .backtrack.json file"><Download size={12} /> Download all</button>{/if}
       </span>
     </header>
     {#if clips.list.length}
       <div class="min-h-0 flex-1 overflow-auto">
         <table class="table" data-testid="clip-list">
-          <thead><tr><th></th><th>Name</th><th>Source</th><th>Length</th><th>Resolution</th><th>Size</th><th>Date</th><th>Sightings</th><th></th></tr></thead>
+          <thead><tr>
+            <th><Checkbox checked={picked.length === clips.list.length} label="Pick every clip" testid="pick-all"
+              onpick={() => (ui.clipIds = picked.length === clips.list.length ? [] : clips.list.map((c) => c.id))} /></th>
+            <th></th><th>Name</th><th>Source</th><th>Length</th><th>Resolution</th><th>Size</th><th>Date</th><th>Sightings</th><th></th></tr></thead>
           <tbody>
-            {#each clips.list as c (c.id)}
-              <tr>
+            {#each clips.list as c, i (c.id)}
+              <tr class={picked.includes(c.id) ? 'bg-[var(--accent-soft)]' : ''}>
+                <td><Checkbox checked={picked.includes(c.id)} label="Pick {c.name}" testid="pick-clip" onpick={(e) => pick(i, e)} /></td>
                 <td class="py-1">
-                  <button class="block h-12 w-[85px] shrink-0 overflow-hidden border border-line bg-stage" title="Mark this clip" aria-label="Mark {c.name}" onclick={() => { ui.clipId = c.id; ui.phase = 'mark'; }}>
+                  <button class="block h-12 w-[85px] shrink-0 overflow-hidden border border-line bg-stage" title="Set up this clip" aria-label="Set up {c.name}" onclick={() => setUp([c.id])}>
                     {#if clipThumb(c.id, c.durationS)}<img src={clipThumb(c.id, c.durationS)} alt="" class="h-full w-full object-cover" draggable="false" />{/if}
                   </button>
                 </td>
-                <td class="w-full min-w-48"><input class="control" value={c.name} aria-label="Clip name" onchange={(e) => rename(c, e.currentTarget.value)} /></td>
+                <td class="w-full min-w-48"><input class="control text-ellipsis" value={c.name} aria-label="Clip name" onchange={(e) => rename(c, e.currentTarget.value)} /></td>
                 <td><span class="tag {c.source === 'buffer' ? 'accent' : ''}">{c.source === 'buffer' ? 'Buffer' : 'Upload'}</span></td>
-                <td class="num">{fmtLen(c.durationS)}</td>
+                <td>{#if Number.isFinite(c.durationS)}<Timecode t={c.durationS} />{:else}-{/if}</td>
                 <td class="num">{c.width}x{c.height}</td>
                 <td class="num">{c.bytes != null ? fmtBytes(c.bytes) : '-'}</td>
                 <td class="num text-muted">{new Date(c.createdAt).toLocaleString()}</td>
                 <td class="num">{uses(c.id)}</td>
                 <td class="text-right">
                   <span class="inline-flex gap-1.5">
-                    <button class="btn sm" onclick={() => { ui.clipId = c.id; ui.phase = 'mark'; }}>Mark</button>
+                    <button class="btn sm" onclick={() => setUp([c.id])}>Set up</button>
                     <button class="btn icon sm" aria-label="Download {c.name}" title="Download the video, and the marks if there are any" onclick={() => download(c)}><Download size={13} /></button>
                     {#if confirmDelete === c.id}
                       <button class="btn sm danger" onclick={() => remove(c)}>Delete{uses(c.id) ? ` with ${uses(c.id)} sightings` : ''}</button>

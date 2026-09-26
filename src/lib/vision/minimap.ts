@@ -1,51 +1,52 @@
 /**
- * Where the user stood, and the map, from the minimap (automation plan section 10, Appendix A.6). The minimap is
+ * The sighting position and the map, from the minimap (automation plan section 10, Appendix A.6). The minimap is
  * north-up with the player arrow at a fixed point, so the position is the offset of the map under the arrow. A local
- * contrast normalization removes the team tint; a mask removes the icons, the zone borders, the arrows and the NAV
+ * contrast normalization removes the team tint. A mask removes the icons, the zone borders, the arrows and the NAV
  * text. Normalized cross-correlation against the map tiles finds the offset, over the minimap zoom levels.
  */
 import { using, type CV } from './cv.ts';
-import { ARROW } from './hud.ts';
+import { ARROW, MINIMAP_H } from './hud.ts';
 import { peakOffset } from './shell.ts';
 import type { Gray8 } from './image.ts';
 import { quadratic } from '../solver/camera.ts';
 import type { MapId } from '../solver/types.ts';
 
-/** The tile pyramid of a map (tools/fetch-map-data.ts): 256 px tiles over tileBounds, in game units. */
+/** The tile pyramid of a map (tools/fetch-map-data.ts), with 256 px tiles over tileBounds, in game units. */
 export interface MapInfo {
   bounds: { minX: number; maxX: number; minY: number; maxY: number };
   tileBounds: { minX: number; maxX: number; minY: number; maxY: number };
   tileSize: number; maxZoom: number;
 }
-/** Loads a tile as gray, or null when it is missing. The worker fetches, the tests read files. */
+/** Loads a tile as gray, or null when it is missing. The worker fetches the tiles, and the tests read files. */
 export type TileLoader = (map: MapId, z: number, x: number, y: number) => Promise<Gray8 | null>;
 
 /**
  * The minimap zoom levels (m per minimap pixel at 2160p), measured on test-data/recording-test-clips/minimap/
- * (Bakurani: 0.196, 0.349, 0.782 and 2.64; capture-test-plan.md section 3.2), and on clip 1 (Ozeti: 0.505). The levels
- * seem to differ per map, so the search tries all of them on every map, and a wide range when none matches.
+ * (0.196, 0.349, 0.782 and 2.64 on Bakurani, capture-test-plan.md section 3.2), and on clip 1 (0.505 on Ozeti). The
+ * levels seem to differ per map, so the search tries all of them on every map, and a wide range when none matches.
  */
 export const MINIMAP_LEVELS = [0.196, 0.349, 0.505, 0.782, 2.64];
-/** The scales of the search near the levels: 3 percent around each. */
+/** The scales of the search near the levels, 3 percent around each. */
 export const levelScales = () => MINIMAP_LEVELS.flatMap((l) => [0.97 * l, l, 1.03 * l]);
-/** The wide range, for a map whose levels are not known: 0.18 to 3 m/px in steps of 6 percent. */
+/** The wide range for a map whose levels are not known, from 0.18 to 3 m/px in steps of 6 percent. */
 export const wideScales = () => Array.from({ length: 49 }, (_, k) => 0.18 * 1.06 ** k);
 
 export interface Template { g: Gray8; mask: Uint8Array; /** The arrow in the template (px). */ arrow: { x: number; y: number } }
 
-/** sRGB to CIE L*a*b* (D65), with L, a, b scaled as OpenCV does for 8-bit images (L 0..255, a and b offset by 128). */
+/** Converts sRGB to CIE L*a*b* (D65), scaled as OpenCV does for 8-bit images (L 0 to 255, a and b offset by 128). */
+const LIN = Float64Array.from({ length: 256 }, (_, c) => (c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 function lab(r: number, g: number, b: number): [number, number, number] {
-  const lin = (c: number) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
-  const R = lin(r), G = lin(g), B = lin(b);
+  const R = LIN[r], G = LIN[g], B = LIN[b];
   const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
   const x = f((0.4124 * R + 0.3576 * G + 0.1805 * B) / 0.95047), y = f(0.2126 * R + 0.7152 * G + 0.0722 * B), z = f((0.0193 * R + 0.1192 * G + 0.9505 * B) / 1.08883);
   return [(116 * y - 16) * 2.55, 500 * (x - y) + 128, 200 * (y - z) + 128];
 }
 
 /**
- * The template of several minimap crops (RGBA): their median in gray, and a mask of the map pixels. Icons, zone
- * borders and the hot zone differ in color from the median of the crop; arrows and black icons are very bright or very
- * dark; the NAV text sits at the bottom right. The mask of every crop counts, which also removes what moves.
+ * Builds the template of several minimap crops (RGBA), which is their median in gray and a mask of the map pixels.
+ * Icons, zone borders and the hot zone differ in color from the median of the crop. Arrows and black icons are very
+ * bright or very dark. The NAV text sits at the bottom right. The mask of every crop counts, which also removes what
+ * moves.
  */
 export function minimapTemplate(crops: { data: Uint8ClampedArray; w: number; h: number }[]): Template {
   const { w, h } = crops[0], n = w * h;
@@ -71,11 +72,11 @@ export function minimapTemplate(crops: { data: Uint8ClampedArray; w: number; h: 
       }
     }
   }
-  const s = h / (1845 - 1470);
+  const s = h / MINIMAP_H;
   return { g: { data: gray, w, h }, mask, arrow: { x: ARROW.x * s, y: ARROW.y * s } };
 }
 
-/** Local contrast normalization (A.6): (g - mean) / sqrt(variance + 4), both Gaussian with sigma s. Returns a CV_32F Mat. */
+/** Local contrast normalization (A.6), (g - mean) / sqrt(variance + 4), both Gaussian of sigma s. Returns a CV_32F Mat. */
 function normalize(cv: CV, src: CV, sigma: number, keep: <O extends { delete(): void }>(o: O) => O): CV {
   const out = keep(new cv.Mat());
   using((tmp) => {
@@ -121,8 +122,8 @@ export async function mosaic(load: TileLoader, map: MapId, info: MapInfo, z: num
 export interface MinimapMatch { score: number; next: number; x: number; y: number; mpp: number }
 
 /**
- * Matches the template against a mosaic at the scales `mpps` (m per minimap pixel at 2160p): the best score, the next
- * peak outside a small circle around it, and where the arrow is in game units.
+ * Matches the template against a mosaic at the scales `mpps` (m per minimap pixel at 2160p). It returns the best score,
+ * the next peak outside a small circle around it, and the arrow position in game units.
  */
 export function matchMinimap(cv: CV, t: Template, m: Mosaic, mpps: number[], frameScale = 1): MinimapMatch | null {
   let best: MinimapMatch | null = null;
@@ -130,7 +131,7 @@ export function matchMinimap(cv: CV, t: Template, m: Mosaic, mpps: number[], fra
     const img = keep(cv.matFromArray(m.g.h, m.g.w, cv.CV_8UC1, m.g.data));
     const tpl = keep(cv.matFromArray(t.g.h, t.g.w, cv.CV_8UC1, t.g.data));
     const msk = keep(cv.matFromArray(t.g.h, t.g.w, cv.CV_8UC1, t.mask));
-    // template px to mosaic px; the crop scales with the frame height, so its meters per pixel do too
+    // the scale from template px to mosaic px. The crop scales with the frame height, so its meters per pixel do too.
     const scaleOf = (mpp: number) => ((mpp / frameScale) * m.pxPerUnit) / 100;
     // the mosaic normalizes with the same ground distance as the template (6 template px), in a few steps of sigma,
     // one normalized mosaic at a time (each is as large as the mosaic in floats)
@@ -155,10 +156,10 @@ export function matchMinimap(cv: CV, t: Template, m: Mosaic, mpps: number[], fra
         cv.matchTemplate(N, tm, res, cv.TM_CCORR_NORMED);
         const mm = cv.minMaxLoc(res);
         if (best && mm.maxVal <= best.score) return;
-        // the peak to a fraction of a mosaic pixel: at zoom 6 a pixel is a meter, as much as a walk of a second
+        // find the peak to a fraction of a mosaic pixel, because at zoom 6 a pixel is a meter, a walk of a second
         const px = mm.maxLoc.x, py = mm.maxLoc.y, v = (x: number, y: number) => res.floatAt(Math.max(0, Math.min(res.rows - 1, y)), Math.max(0, Math.min(res.cols - 1, x)));
         const sx = px + peakOffset(v(px - 1, py), mm.maxVal, v(px + 1, py)), sy = py + peakOffset(v(px, py - 1), mm.maxVal, v(px, py + 1));
-        // the next peak: the best value outside a circle around the best one
+        // the next peak is the best value outside a circle around the best one
         const r = Math.round(30 * k) + 5;
         cv.circle(res, mm.maxLoc, r, new cv.Scalar(-1), -1);
         const next = cv.minMaxLoc(res).maxVal;
@@ -171,9 +172,9 @@ export function matchMinimap(cv: CV, t: Template, m: Mosaic, mpps: number[], fra
 }
 
 /**
- * The walking path from positions over time: a quadratic in time per axis, by least squares, twice, the second time
- * without positions more than 3 robust sigmas off (a minimap match on the wrong spot). A walk over the few seconds of
- * a flight is smooth. Null with fewer than 4 positions.
+ * Fits the walking path from positions over time as a quadratic in time per axis, by least squares. It fits twice, and
+ * the second time leaves out positions more than 3 robust sigmas off (a minimap match on the wrong spot). A walk over
+ * the few seconds of a flight is smooth. Returns null with fewer than 4 positions.
  */
 export function smoothPath(pts: { t: number; x: number; y: number }[]): ((t: number) => { x: number; y: number }) | null {
   const fit = (ps: typeof pts) => {

@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
-   * A number that Backtrack can detect: the field shows the value the solver uses, typing a value makes it the
-   * user's, and emptying the field goes back to the automatic value. FieldTag shows the state.
+   * A number that Backtrack can detect. The field shows the value the solver uses, a typed value becomes the user's,
+   * and an empty field goes back to the automatic value. FieldTag shows the state.
    */
   import NumInput from './NumInput.svelte';
   import FieldTag from './FieldTag.svelte';

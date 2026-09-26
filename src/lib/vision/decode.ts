@@ -56,7 +56,7 @@ async function frameOf(s: VideoSample, t: number): Promise<Frame> {
   const w = s.displayWidth, h = s.displayHeight;
   const gray = new Uint8Array(w * h);
   if (s.format === 'I420' || s.format === 'NV12' || s.format === 'I420A') {
-    // the Y plane, from the limited range of the video (16 to 235) to full range
+    // map the Y plane from the limited range of the video (16 to 235) to full range
     const buf = new Uint8Array(s.allocationSize());
     const [Y] = await s.copyTo(buf);
     const lut = new Uint8Array(256).map((_, v) => Math.max(0, Math.min(255, Math.round(((v - 16) * 255) / 219))));
@@ -65,8 +65,8 @@ async function frameOf(s: VideoSample, t: number): Promise<Frame> {
       for (let x = 0; x < w; x++) gray[y * w + x] = lut[buf[row + x]];
     }
   } else {
-    // RGB that the browser made from the YUV of the video (Firefox gives BGRX): the luma weights of the same color
-    // matrix give the Y back, so every browser sees the same gray
+    // the browser made this RGB from the YUV of the video (Firefox gives BGRX). The luma weights of the same color
+    // matrix give the Y back, so every browser sees the same gray.
     const [kr, kb] = s.colorSpace?.matrix === 'bt709' ? [0.2126, 0.0722] : [0.299, 0.114], kg = 1 - kr - kb;
     const bgr = s.format === 'BGRX' || s.format === 'BGRA', rgb = s.format === 'RGBX' || s.format === 'RGBA';
     if (bgr || rgb) {

@@ -37,6 +37,8 @@ function localData(): Plugin {
 export default defineConfig({
   base,
   plugins: [svelte(), tailwindcss(), localData()],
+  // @panth977/agentation-svelte reads an undefined __VERSION__ global in its settings panel
+  define: { __VERSION__: JSON.stringify('0.1.2') },
   // test-data/ holds clips and the capture test load log, which changes every second
   server: { port: 5175, open: false, watch: { ignored: ['**/test-data/**'] } },
   build: { target: 'es2022' },

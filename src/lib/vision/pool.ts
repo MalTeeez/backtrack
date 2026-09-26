@@ -1,5 +1,5 @@
 /**
- * A pool of vision workers (vision.worker.ts), one per spare CPU core, each with its own OpenCV: the work per frame of
+ * A pool of vision workers (vision.worker.ts), one per spare CPU core, each with its own OpenCV. The work per frame of
  * the detection runs on all cores (automation plan section 14). Data that many jobs share (the reference frame and its
  * features) goes to each worker once and stays there under a key.
  */
@@ -35,7 +35,7 @@ export class Pool {
     }
   }
 
-  /** Runs a task on the next free worker. `need` gives shared data by key: a worker that lacks a key gets it first. */
+  /** Runs a task on the next free worker. `need` gives shared data by key. A worker that lacks a key gets it first. */
   run<T>(task: string, args: Record<string, unknown>, need: Record<string, () => unknown> = {}): Promise<T> {
     return new Promise<T>((ok, fail) => {
       this.queue.push({ task, args, need, ok: ok as (v: unknown) => void, fail });
@@ -58,6 +58,11 @@ export class Pool {
     }
   }
 
+  /** Starts every worker. Each loads its OpenCV (about 3 s), so the first detection does not wait for it. */
+  warm() {
+    return Promise.all(this.slots.map(() => this.run('warm', {})));
+  }
+
   /** Forgets the shared data of a run in every worker. */
   drop(prefix: string) {
     for (const slot of this.slots) {
@@ -77,7 +82,7 @@ export class Pool {
 }
 
 let runs = 0;
-/** The stabilization spread over the pool: a job per frame, the frame it is compared with sent once per worker. */
+/** The stabilization spread over the pool, with a job per frame. Each worker gets a frame to compare with only once. */
 export function poolRunner(pool: Pool): StabRunner {
   const run = `stab${runs++}:`;
   const ids = new WeakMap<object, number>();

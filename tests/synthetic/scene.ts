@@ -21,6 +21,8 @@ export interface SceneOptions {
   lead?: number; tail?: number;
   /** The observer walks at this velocity (m/s, east and north); O is where they stand at the impact. */
   walk?: [number, number];
+  /** The observer stands this high (m) on something the ground heights do not have: a wall, a vehicle. */
+  standOn?: number;
 }
 
 export interface Truth {
@@ -79,7 +81,7 @@ export function makeScene(o: SceneOptions = {}): Truth {
   const T = path.T;
 
   const ox = C[0] + layout.side * Math.cos(th), oy = C[1] - layout.side * Math.sin(th);
-  const O: Vec3 = [ox, oy, gz(ox, oy) + EYE_HEIGHT_M];
+  const O: Vec3 = [ox, oy, gz(ox, oy) + (o.standOn ?? 0) + EYE_HEIGHT_M];
   const mid = [(G[0] + C[0]) / 2 - O[0], (G[1] + C[1]) / 2 - O[1]];
   const az = ((Math.atan2(mid[0], mid[1]) * 180) / Math.PI + 360) % 360;
   const camH = Math.round(az * 10) / 10 + 3, camP = layout.pitch;
@@ -99,7 +101,10 @@ export function makeScene(o: SceneOptions = {}): Truth {
     weapon, W, H, fovDeg, fps, f, G, C, O, dirDeg, camH, camP, T,
     fireTime, impactTime: fireTime + T, duration: fireTime + T + tail,
     edges, craterPx: proj(C),
-    observerAt: (t) => [O[0] + (o.walk?.[0] ?? 0) * (t - fireTime - T), O[1] + (o.walk?.[1] ?? 0) * (t - fireTime - T), O[2]],
+    observerAt: (t) => {
+      const x = O[0] + (o.walk?.[0] ?? 0) * (t - fireTime - T), y = O[1] + (o.walk?.[1] ?? 0) * (t - fireTime - T);
+      return [x, y, gz(x, y) + (o.standOn ?? 0) + EYE_HEIGHT_M];
+    },
     shellAt: (t) => {
       const tt = t - fireTime;
       if (tt < 0 || tt > T) return null;

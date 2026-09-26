@@ -6,7 +6,11 @@
    * phase gives it the keys: L locks, Z changes the zoom, and Ctrl with the arrows moves the spot. The marks
    * also grow with the zoom, as if drawn on the video.
    */
-  import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Lock, LockOpen } from '@lucide/svelte';
+  import ChevronDown from '@jis3r/icons/icons/chevron-down';
+  import ChevronLeft from '@jis3r/icons/icons/chevron-left';
+  import ChevronRight from '@jis3r/icons/icons/chevron-right';
+  import ChevronUp from '@jis3r/icons/icons/chevron-up';
+  import { Lock, LockOpen } from '@lucide/svelte';
   import Key from '../Key.svelte';
   import type { Pt, Sighting } from '../../lib/solver/types.ts';
   import { css, drawMarks, hitMark, type Handle } from './draw.ts';
@@ -116,19 +120,19 @@
     </div>
     <div class="flex flex-col gap-1 text-[11px] text-muted">
       <span class="flex items-center gap-1.5" title="Lock the magnifier where the pointer is, or free it"><Key k="L" /> lock</span>
-      <span class="flex items-center gap-1.5" title="Move the locked spot by 0.75 px, or 7.5 px with Shift"><Key k="Ctrl" /> + arrows</span>
+      <span class="flex items-center gap-1.5" title="Move the locked spot by 0.75 px, or 7.5 px with Shift"><Key k="Ctrl" /> and arrows</span>
     </div>
     <div class="grid w-fit grid-cols-3 gap-1" role="group" aria-label="Move the magnifier">
       <span></span>
-      <button class="btn icon sm" aria-label="Move up" title="Move up 0.75 px (Shift: 7.5 px)" disabled={!center} onclick={(e) => nudge(e, 0, -1)}><ChevronUp size={14} /></button>
+      <button class="btn icon sm" aria-label="Move up" title="Move up 0.75 px, or 7.5 px with Shift" disabled={!center} onclick={(e) => nudge(e, 0, -1)}><ChevronUp size={14} /></button>
       <span></span>
-      <button class="btn icon sm" aria-label="Move left" title="Move left 0.75 px (Shift: 7.5 px)" disabled={!center} onclick={(e) => nudge(e, -1, 0)}><ChevronLeft size={14} /></button>
-      <button class="btn icon sm {locked ? 'primary' : ''}" aria-label={locked ? 'Unlock' : 'Lock'} aria-pressed={locked} title={locked ? 'Unlock: follow the pointer again' : 'Lock at the current spot'} disabled={!center} onclick={onlock} data-testid="magnifier-lock">
+      <button class="btn icon sm" aria-label="Move left" title="Move left 0.75 px, or 7.5 px with Shift" disabled={!center} onclick={(e) => nudge(e, -1, 0)}><ChevronLeft size={14} /></button>
+      <button class="btn icon sm {locked ? 'primary' : ''}" aria-label={locked ? 'Unlock' : 'Lock'} aria-pressed={locked} title={locked ? 'Unlock, so the magnifier follows the pointer again' : 'Lock at the current spot'} disabled={!center} onclick={onlock} data-testid="magnifier-lock">
         {#if locked}<Lock size={14} />{:else}<LockOpen size={14} />{/if}
       </button>
-      <button class="btn icon sm" aria-label="Move right" title="Move right 0.75 px (Shift: 7.5 px)" disabled={!center} onclick={(e) => nudge(e, 1, 0)}><ChevronRight size={14} /></button>
+      <button class="btn icon sm" aria-label="Move right" title="Move right 0.75 px, or 7.5 px with Shift" disabled={!center} onclick={(e) => nudge(e, 1, 0)}><ChevronRight size={14} /></button>
       <span></span>
-      <button class="btn icon sm" aria-label="Move down" title="Move down 0.75 px (Shift: 7.5 px)" disabled={!center} onclick={(e) => nudge(e, 0, 1)}><ChevronDown size={14} /></button>
+      <button class="btn icon sm" aria-label="Move down" title="Move down 0.75 px, or 7.5 px with Shift" disabled={!center} onclick={(e) => nudge(e, 0, 1)}><ChevronDown size={14} /></button>
       <span></span>
     </div>
   </div>

@@ -10,11 +10,11 @@ export interface XY { x: number; y: number }
 
 /**
  * What a detector found for a value (automation plan section 2): the value, its standard deviation in the unit of the
- * value, and a confidence from 0 to 1. Below REQUIRED_BELOW (field.ts) the value does not count, and `reason` says why.
+ * value, and a confidence from 0 to 1. Below REQUIRED_BELOW (field.ts), the value does not count, and `reason` says why.
  */
 export interface Detected<T> {
   value?: T; sigma?: number; conf: number; reason?: string;
-  /** Values of one group share their error: the camera of the frames of one section comes from one fit. */
+  /** Values of one group share their error. For example, the camera of the frames of one section comes from one fit. */
   group?: string;
 }
 /** A value Backtrack can detect and the user can override. The user's value always wins. */
@@ -26,7 +26,7 @@ export interface Impact { a: number; b: number }
 export interface Clip {
   id: Id; name: string; source: 'buffer' | 'upload';
   blob: Blob; durationS: number; width: number; height: number; createdAt: number;
-  /** Presentation time of every frame, sorted (prepareClip.ts). Absent on clips saved before it existed. */
+  /** The presentation time of every frame, sorted (prepareClip.ts). Absent on clips saved before the list existed. */
   frames?: number[];
 }
 /** A clip without its video and its frame list, with the size of its video (bytes). The rest of the app passes this form around. */
@@ -39,8 +39,8 @@ export type MapId = 'bakurani' | 'ozeti' | 'zestafona';
 export interface Settings {
   fovDeg: number; fovAxis: 'h' | 'v';
   /**
-   * The weapon the user picked, with its range limits. Absent: the solver tries every weapon and takes the one that
-   * fits clearly better (automation plan section 12.4), each with its own range.
+   * The weapon the user picked, with its range limits. When it is absent, the solver tries every weapon and takes the
+   * one that fits clearly better (automation plan section 12.4), each with its own range.
    */
   weapon?: Weapon; rangeMinM: number; rangeMaxM: number; limitToRange: boolean;
   bufferS: number; bitrateMbps: number;
@@ -49,10 +49,17 @@ export interface Settings {
 
 /** What the project knows about a clip besides its marks. */
 export interface ClipData {
-  /** The map the clip comes from: its image under the maps, and its terrain for the solver. */
+  /** The map the clip comes from. The maps show its image, and the solver uses its terrain. */
   map: Field<MapId>;
   /** The sections the detection ran on (automation plan section 8.1). */
   sections?: Section[];
+  /** How the user works on the clip, with the guided automatic flow or by hand. Absent until the user picks. */
+  mode?: 'auto' | 'manual';
+  /**
+   * The shot sections the user marked for the automatic flow and that the Process button did not detect yet (s). Each belongs
+   * to the shot of the lane it was drawn in. Without `shotId` (an older project), it goes to the next free shot.
+   */
+  pending?: { a: number; b: number; shotId?: Id }[];
 }
 
 /**
@@ -66,24 +73,25 @@ export interface Section {
   /** The time of each part of the run (ms), for the speed work (src/lib/vision/profile.ts). */
   profile?: Record<string, number>;
   width: number; height: number;
-  /** The reference frame (s), and every decoded frame: rotation (b_frame = R b_ref, row-major), inliers, fit (px). */
+  /** The reference frame (s), and every decoded frame with its rotation (b_frame = R b_ref, row-major), inliers and fit (px). */
   ref: number;
   frames: { t: number; R: number[] | null; ok: boolean; inliers: number; fitPx: number }[];
   /** The camera of the reference frame (deg). The user can override it for the whole section. */
   heading: Field<number>; pitch: Field<number>; roll: Field<number>;
   /**
-   * The shell marks: in the frame (px as the app counts them, pixel i spans i to i + 1) and in the reference camera
-   * (px as the vision code counts them, pixel centers on whole numbers), with their detection score.
+   * The shell marks in the frame and in the reference camera, with their detection score. The frame uses px as the app
+   * counts them, where pixel i spans i to i + 1. The reference camera uses px as the vision code counts them, with pixel
+   * centers on whole numbers.
    */
   marks: { t: number; x: number; y: number; rx: number; ry: number; score: number }[];
   /** The vertical lines of the pitch, in the reference camera (px), for the overlay. */
   lines: [number, number, number, number][];
   impact: Detected<Impact> & { at?: XY };
-  /** The minimap: the map, where the user stood, and the scale (m per minimap pixel at 2160p). */
+  /** What the minimap gives, which is the map, the sighting position and the scale (m per minimap pixel at 2160p). */
   minimap?: { map: Detected<MapId>; at: Detected<XY>; mpp: number };
   /**
-   * Where the user was (game units) on frames of the section up to the impact, smoothed, when they walked: each frame
-   * matched on its own. Missing when the user stood still (moved less than a few meters).
+   * The sighting position (game units) on frames of the section up to the impact, smoothed, when the user walked. The
+   * search matched each frame on its own. Missing when the user stood still (moved less than a few meters).
    */
   walk?: { t: number; x: number; y: number }[];
   /** Frames of the section without a sighting, and why. */
@@ -92,7 +100,7 @@ export interface Section {
   notes: string[];
 }
 
-/** A rangefinder reading: where the user stood (game units), a compass heading (deg) and a distance (m). */
+/** A rangefinder reading, with the sighting position (game units), a compass heading (deg) and a distance (m). */
 export interface Rangefinder { x?: number; y?: number; headingDeg?: number; distanceM?: number }
 
 export interface Shot {
@@ -108,12 +116,28 @@ export interface Shot {
   /** The impact in each clip (clipId). */
   impact: Record<Id, Field<Impact>>;
   /**
-   * Where the user stood during the flight in each clip (clipId), from the minimap. The solver takes it with an
-   * uncertainty; without it, the solver finds the spot from the crater.
+   * The sighting position during the flight in each clip (clipId), from the minimap. The solver takes it with an
+   * uncertainty. Without it, the solver finds the sighting position from the crater.
    */
   observer: Record<Id, Field<XY>>;
+  /**
+   * How high (m) the user stood above the terrain data in each clip (clipId). The user can stand on a wall, a vehicle
+   * or built blocks, which the terrain data does not have.
+   */
+  raisedM?: Record<Id, Field<number>>;
+  /** How high (m) the crater lies above the terrain data, when the shell hit a vehicle, a wall or built blocks. */
+  craterRaisedM?: number;
+  /** The findings of the Review phase that the user signed off. Each finding id maps to the key its value had then. */
+  signoff?: Record<string, string>;
   /** The clip the shot belongs to (one clip for now). None only for a new shot while no clip has taken it. */
   clipId?: Id;
+  /**
+   * The flow the shot belongs to, the automatic one or marking by hand. Each flow shows only its own shots, unless a
+   * shot is `shared`, which shows it in the other flow too. A shot without a flow belongs to the automatic flow when
+   * the detection or the section tool worked on it.
+   */
+  flow?: 'auto' | 'manual';
+  shared?: boolean;
 }
 
 export interface Sighting {
@@ -126,11 +150,11 @@ export interface Sighting {
   heading: Field<number>;
   pitch: Field<number>;
   roll: Field<number>;
-  /** The zoom of binoculars or a scope on this frame: the field of view is the game FOV divided by it. 1 without. */
+  /** The zoom of binoculars or a scope on this frame. The field of view is the game FOV divided by it. 1 without a zoom. */
   zoom?: number;
   /**
-   * Where the user stood on this frame against where they stood at the impact (m, east and north), from the path of
-   * the minimap: a user who walks. Without it the user stood still during the flight.
+   * The sighting position on this frame relative to the one at the impact (m, east and north), from the path of the
+   * minimap, for a user who walks. Without it, the user stood still during the flight.
    */
   walkM?: [number, number];
   /** Left out of the calculation, to test what it changes. */
@@ -153,31 +177,33 @@ export interface ProjectData {
 export interface Heights {
   crater: Record<Id, number>; // shotId
   gun: Record<Id, number>; // shotId
-  /** The ground where the user stood (shotId); the height of the crater when missing. */
+  /** The ground at the sighting position (shotId). When it is missing, the height of the crater counts. */
   observer?: Record<Id, number>;
+  /** For a sighting of a walk (sightingId), the ground there relative to the ground at the sighting position at the impact. */
+  walk?: Record<Id, number>;
 }
 
 /**
- * One line of sight to the shell: its origin (above the crater), its unit direction, the seconds before impact, and
- * its clip. The solver finds where the user stood in each clip. `sigma` is the angular error (rad) of the ray: its
- * mark, and the error of its frame time at the speed the shell moves across the image (section 12.5).
+ * One line of sight to the shell, with its origin (above the crater), its unit direction, the seconds before the
+ * impact, and its clip. The solver finds the sighting position in each clip. `sigma` is the angular error (rad) of the
+ * ray, from its mark and from the error of its frame time at the speed the shell moves across the image (section 12.5).
  */
 export interface Ray {
   O: Vec3; D: Vec3; tau: number; clip: Id;
   /** The sighting of the ray. */
   sighting?: Id;
-  /** The angular error (rad) across the path of the shell: the mark and the camera. */
+  /** The angular error (rad) across the path of the shell, from the mark and the camera. */
   sigma?: number;
   /**
    * The direction the shell moves in the image at this ray (unit, across the ray), and the angular error (rad) along
-   * it: the mark, and the error of the frame time at the speed of the shell (section 12.5). A frame time only moves a
-   * mark along the path, so a fast mark keeps what it says across the path.
+   * it. That error comes from the mark and from the error of the frame time at the speed of the shell (section 12.5). A
+   * frame time only moves a mark along the path, so a fast mark keeps what it says across the path.
    */
   along?: Vec3; sigmaAlong?: number;
 }
 
 /**
- * Where the user stood in a clip, as a shift (m) from the crater that the solver pulls the fit toward, and its
+ * The sighting position in a clip, as a shift (m) from the crater that the solver pulls the fit toward, and its
  * standard deviation (m).
  */
 export interface ShiftPrior { s: [number, number]; sigma: number }
@@ -194,7 +220,7 @@ export interface Fit {
   /** The RMS miss of the rays (m), and the RMS of their angle beyond what a miss of 10 m explains (deg). */
   missM: number; excess: number;
   /**
-   * With terrain: how close the flight comes to the ground. `deg` is the least angle of the gap as seen from the nearer
+   * With terrain, how close the flight comes to the ground. `deg` is the least angle of the gap as seen from the nearer
    * end, `atM` where that is (m from the gun), and `m` the least height above the ground.
    */
   clearance?: { m: number; deg: number; atM: number };
@@ -219,11 +245,11 @@ export interface SolveOptions {
   rmax: number;
   useRange: boolean;
   ballistics: { v0: number; k: number; elevMinDeg: number; elevMaxDeg: number };
-  /** The terrain, when known: flights that run into it do not count. */
+  /** The terrain, when known. Flights that run into it do not count. */
   ground?: GroundAt;
   /** A known fit to search around (the Monte Carlo runs), instead of every direction and elevation. */
   near?: { th: number; e: number };
-  /** Where the minimap puts the user in each clip, as a shift from the crater. */
+  /** The sighting position from the minimap in each clip, as a shift from the crater. */
   priors?: Record<Id, ShiftPrior>;
 }
 

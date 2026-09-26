@@ -25,8 +25,9 @@ export interface Kinds {
 export type Kind = keyof Kinds;
 
 /**
- * Per kind: the sigma at which the confidence is 50 percent (first proposals of section 2.2, the benchmark sets the
- * final values), the least difference that earns a warning, and the difference of two values.
+ * The rule of each kind holds the sigma at which the confidence is 50 percent, the least difference that earns a
+ * warning, and the difference of two values. The sigmas are first proposals of section 2.2, and the benchmark sets the
+ * final values.
  */
 const RULES: { [K in Kind]: { limit: number; min: number; diff: (a: Kinds[K], b: Kinds[K]) => number } } = {
   heading: { limit: 0.3, min: 0.5, diff: (a, b) => Math.abs(angleDiff(a, b)) },
@@ -40,14 +41,14 @@ const RULES: { [K in Kind]: { limit: number; min: number; diff: (a: Kinds[K], b:
   weapon: { limit: 0, min: 0, diff: (a, b) => (a === b ? 0 : 1) },
 };
 
-/** The impact time the solver uses: the middle of the interval (section 9). */
+/** The impact time the solver uses, which is the middle of the interval (section 9). */
 export const impactTime = (i: Impact) => (i.a + i.b) / 2;
-/** Its standard deviation: half the interval. */
+/** Its standard deviation, which is half the interval. */
 export const impactSigma = (i: Impact) => (i.b - i.a) / 2;
 
-/** The confidence (0 to 1) of a value with standard deviation sigma: 50 percent at the limit of its kind. */
+/** The confidence (0 to 1) of a value with standard deviation sigma. It is 50 percent at the limit of its kind. */
 export const confSigma = (kind: Kind, sigma: number) => 2 ** -((sigma / RULES[kind].limit) ** 2);
-/** The confidence from the ratio of the best score to the next one: 0 at a ratio of 1, 50 percent at `limit`. */
+/** The confidence from the ratio of the best score to the next one. It is 0 at a ratio of 1 and 50 percent at `limit`. */
 export const confRatio = (ratio: number, limit: number) => (ratio <= 1 ? 0 : 1 - 2 ** -((ratio - 1) / (limit - 1)));
 /** A detection with its confidence from sigma. */
 export const detected = <K extends Kind>(kind: K, value: Kinds[K] | undefined, sigma: number, reason?: string): Detected<Kinds[K]> =>
@@ -58,9 +59,9 @@ export function autoValue<T>(f: Field<T> | undefined): T | undefined {
   const a = f?.auto;
   return a && a.value !== undefined && a.conf >= REQUIRED_BELOW ? a.value : undefined;
 }
-/** The value the solver uses: the user's, else a confident automatic one. */
+/** The value the solver uses, which is the user's value or else a confident automatic one. */
 export const value = <T>(f: Field<T> | undefined): T | undefined => f?.manual ?? autoValue(f);
-/** The standard deviation that goes with value(): the detector's for an automatic value, else none. */
+/** The standard deviation that goes with value(). An automatic value has the one of its detector, a manual value none. */
 export const sigmaOf = <T>(f: Field<T> | undefined): number | undefined => (f?.manual === undefined && autoValue(f) !== undefined ? f!.auto!.sigma : undefined);
 
 export type FieldState = 'auto' | 'required' | 'manual' | 'warned';
@@ -84,11 +85,14 @@ export const field = <T>(manual?: T): Field<T> => (manual === undefined ? {} : {
 
 const UNITS: Record<Kind, string> = { heading: 'deg', pitch: 'deg', roll: 'deg', shell: 'px', impact: 's', observer: 'units', crater: 'units', map: '', weapon: '' };
 
-/** The warning of a manual value that differs from a confident automatic one, for the field and the result notes. */
-export function fieldWarning<K extends Kind>(kind: K, f: Field<Kinds[K]> | undefined, fmt: (v: Kinds[K]) => string): string | null {
+/**
+ * The warning of a manual value that differs from a confident automatic one, for the field and the result notes. The
+ * warning opens with `what`, the name of the value.
+ */
+export function fieldWarning<K extends Kind>(kind: K, f: Field<Kinds[K]> | undefined, fmt: (v: Kinds[K]) => string, what = 'Your value'): string | null {
   const d = offBy(kind, f);
   if (d == null) return null;
   const a = autoValue(f)!;
   const by = kind === 'map' || kind === 'weapon' ? '' : ` by ${d.toFixed(kind === 'observer' || kind === 'crater' ? 2 : kind === 'impact' ? 3 : 1)} ${UNITS[kind]}`;
-  return `Your value differs from the automatic ${fmt(a)}${by}.`;
+  return `${what} differs from the automatic ${fmt(a)}${by}.`;
 }

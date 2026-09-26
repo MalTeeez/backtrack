@@ -1,18 +1,18 @@
 <script module lang="ts">
   let dialog: HTMLDialogElement | undefined = $state();
-  /** Opens the settings as a modal dialog: it takes the focus, and Escape closes it. */
+  /** Opens the settings as a modal dialog. The dialog takes the focus, and Escape closes it. */
   export const openSettings = () => dialog?.showModal();
 </script>
 
 <script lang="ts">
   /**
-   * The settings of the user, as a modal dialog: the field of view of the game, which every angle and the stabilization
-   * depend on. They stay in this browser for every project (prefs.svelte.ts).
+   * The settings of the user, as a modal dialog. They hold the field of view of the game, which every angle and the
+   * stabilization depend on. They stay in this browser for every project (prefs.svelte.ts).
    */
-  import { X } from '@lucide/svelte';
+  import X from '@jis3r/icons/icons/x';
   import { FOV_RANGE, prefs, setPrefs } from '../lib/state/prefs.svelte.ts';
 
-  // the dialog edits a copy: Save keeps it, Escape and Cancel drop it
+  // the dialog edits a copy. Save keeps it, and Escape and Cancel drop it.
   let fov = $state(prefs.fovDeg), axis = $state(prefs.fovAxis);
   const valid = $derived(Number.isFinite(fov) && fov >= FOV_RANGE.min && fov <= FOV_RANGE.max);
   const reset = () => { fov = prefs.fovDeg; axis = prefs.fovAxis; };

@@ -9,8 +9,8 @@ export type CV = any;
 
 let ready: Promise<{ cv: CV }> | null = null;
 /**
- * OpenCV, as `{ cv }`. The module object has a `then` of its own, so it always travels in a wrapper: a promise (or an
- * async function) that resolves to the module itself waits on it forever.
+ * Loads OpenCV and returns it as `{ cv }`. The module object has a `then` of its own, so it always travels in a
+ * wrapper. A promise (or an async function) that resolves to the module itself waits on it forever.
  */
 export function loadCv(): Promise<{ cv: CV }> {
   ready ??= (async () => {

@@ -36,14 +36,14 @@ export function missing(p: ProjectData, clips: Pick<ClipMeta, 'id' | 'name'>[]):
     if (noImpact) out.mark.push(`${shot.name} has no impact mark in ${noImpact} clip(s). Mark the frame where the shell lands.`);
     if (list.length < NEEDED) out.mark.push(`${shot.name} has ${list.length} sighting(s) and needs ${NEEDED}.`);
     else if (list.length < 10) out.warnings.push(`${shot.name} has ${list.length} sightings. The result gets more accurate with about 10 or more.`);
-    // where the user stood is enough: the solver then finds the crater (automation plan section 11)
+    // A known sighting position is enough, because the solver then finds the crater (automation plan section 11).
     if (!anchorGame(shot)) {
       out.coordinates.push(shot.rangefinder
         ? `The rangefinder reading of ${shot.name} needs your X and Y, the heading and the distance.`
-        : `The crater of ${shot.name} has no X and Y, and where you stood is not known either.`);
+        : `The crater of ${shot.name} has no X and Y, and the sighting position is not known either.`);
     }
   }
-  // jumps in the motion of the shell: the video probably skipped frames
+  // A jump in the motion of the shell means that the video probably skipped frames.
   const jumps = motionFlags(p);
   for (const shot of usedShots) {
     const own = jumps.filter((f) => f.shotId === shot.id);

@@ -1,17 +1,17 @@
 /**
  * The heading of the reference camera (automation plan section 7). Every compass reading of a frame, with the yaw of
- * that frame against the reference from the stabilization, gives an interval for the reference heading: the display
- * shows whole degrees. The intervals of all frames overlap in a narrow band once the display changes during the
+ * that frame against the reference from the stabilization, gives an interval for the reference heading, because the
+ * display shows whole degrees. The intervals of all frames overlap in a narrow band once the display changes during the
  * section. A reading that disagrees with most others (a misread) drops out.
  */
 import { wrap360 } from '../solver/camera.ts';
 import { cameraToWorld, frameCamera, type Mat3 } from './rotation.ts';
 
 /**
- * How the game turns a heading into its display: `round` shows 197 from 196.5 on, `floor` from 197.0 on. The capture
- * test decides it (capture-test-plan.md section 3.3). The label strip reads 0.27 to 0.29 deg above the truncated
- * fusion on clip 1 (shot 2) and clip 2, and 0.77 to 0.79 above the rounded one: truncation, if the strip has a small
- * offset of its own, which fits an integer cast in the game.
+ * How the game turns a heading into its display. With `round` it shows 197 from 196.5 on, with `floor` from 197.0 on.
+ * The capture test decides it (capture-test-plan.md section 3.3). The label strip reads 0.27 to 0.29 deg above the
+ * truncated fusion on clip 1 (shot 2) and clip 2, and 0.77 to 0.79 above the rounded one. This points to truncation if
+ * the strip has a small offset of its own, and truncation fits an integer cast in the game.
  */
 export type Rounding = 'round' | 'floor';
 export const ROUNDING: Rounding = 'floor';
@@ -22,15 +22,15 @@ export interface HeadingFit {
   used: number; readings: number;
 }
 
-/** The yaw (deg) of a frame against the reference camera: its heading when the reference faces 0. */
+/** The yaw (deg) of a frame against the reference camera, which is its heading when the reference faces 0. */
 export const yawOf = (pitch: number, roll: number, R: Mat3) => {
   const h = frameCamera(cameraToWorld(0, pitch, roll), R).h;
   return h > 180 ? h - 360 : h;
 };
 
 /**
- * Fuses the readings: each is the displayed number and the yaw of its frame. The band covered by the most intervals
- * wins; its middle is the heading, and it counts as uniform over the band (sigma = width / sqrt(12)).
+ * Fuses the readings. Each reading is the displayed number and the yaw of its frame. The band that the most intervals
+ * cover wins. Its middle is the heading, and the heading counts as uniform over the band (sigma = width / sqrt(12)).
  */
 export function fuseHeading(readings: { shown: number; yaw: number }[], rounding: Rounding = ROUNDING): HeadingFit | null {
   if (!readings.length) return null;
@@ -42,7 +42,7 @@ export function fuseHeading(readings: { shown: number; yaw: number }[], rounding
     lo += Math.round((first - lo) / 360) * 360;
     return [lo, lo + (off1 - off0)] as [number, number];
   });
-  // sweep: the part covered by the most intervals
+  // a sweep finds the part that the most intervals cover
   const ev = iv.flatMap(([a, b]) => [[a, 1], [b, -1]] as [number, number][]).sort((p, q) => p[0] - q[0] || p[1] - q[1]);
   let n = 0, bestN = 0, lo = 0, hi = 0;
   for (let k = 0; k < ev.length; k++) {
@@ -54,8 +54,9 @@ export function fuseHeading(readings: { shown: number; yaw: number }[], rounding
 }
 
 /**
- * The heading from the compass label strip (Appendix A.4): the labels every 15 deg at 14.77 px per degree (2160p).
- * The fallback, and the absolute check of the rounding rule: about +/-0.3 deg, and not on bright sky.
+ * The heading from the compass label strip (Appendix A.4), which has a label every 15 deg at 14.77 px per degree
+ * (2160p). It is the fallback and the absolute check of the rounding rule. It reads to about +/-0.3 deg, and it does not
+ * work on bright sky.
  */
 export function stripHeading(g: { data: ArrayLike<number>; w: number; h: number }, shown: number): number | null {
   const s = g.h / 2160, k = 14.767 * s, cx = g.w / 2;
@@ -67,7 +68,7 @@ export function stripHeading(g: { data: ArrayLike<number>; w: number; h: number 
   for (let yy = Math.round(22 * s); yy < Math.round(58 * s) && yy < band; yy++) {
     const y = y0 + yy;
     for (let x = r; x < g.w - r; x++) {
-      // a 2-D blur is a 1-D blur twice; the vertical part matters little on a thin band, so this blurs along x only
+      // a 2-D blur is a 1-D blur twice. The vertical part matters little on a thin band, so this blurs along x only.
       let b = 0;
       for (let i = -r; i <= r; i++) b += wts[i + r] * g.data[y * g.w + x + i];
       col[x] += Math.abs(g.data[y * g.w + x] - b / wsum);

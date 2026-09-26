@@ -1,6 +1,6 @@
 /**
- * Draws the downloaded map imagery under a canvas map in game units. The tiles share one pyramid over `tileBounds`:
- * zoom z has 2^z tiles per side, x counts from minX and y from maxY.
+ * Draws the downloaded map imagery under a canvas map in game units. The tiles share one pyramid over `tileBounds`.
+ * Zoom z has 2^z tiles per side, x counts from minX, and y counts from maxY. The tile sources are:
  * - color: local-data/maps/<id>/zoom_<z>/<x>_<y>.webp (tools/fetch-map-data.ts, from wardogs-calculator)
  * - topography: local-data/topo/<id>/<z>/<x>_<y>.png (tools/make-topo.ts), from the terrain, up to zoom 5
  * The style picks the color imagery, the same in gray, or the topography, and the opacity lets marks on top stand out.
@@ -52,18 +52,18 @@ export function mapInfo(id: MapId): Promise<MapInfo | null> {
   return p;
 }
 
-/** A view of the map: game units to canvas pixels. */
+/** A view of the map, which maps game units to canvas pixels. */
 export interface View { toPx: (x: number, y: number) => [number, number]; pxPerUnit: number; width: number; height: number }
 
 /**
  * Draws the tiles that the view shows, at the zoom that matches its scale. Tiles that are still loading call
  * `redraw` once they arrive. Returns the zoom as "z/max", or null when the view misses the map.
  */
-export function drawTiles(g: CanvasRenderingContext2D, id: MapId, info: MapInfo, v: View, redraw: () => void) {
+export function drawTiles(g: CanvasRenderingContext2D, id: MapId, info: MapInfo, v: View, redraw: () => void, opacity = tiles.opacity) {
   const tb = info.tileBounds;
   const worldW = tb.maxX - tb.minX, worldH = tb.maxY - tb.minY;
   const maxZoom = tiles.style === 'topo' ? Math.min(info.maxZoom, TOPO_MAX_ZOOM) : info.maxZoom;
-  const dpr = g.getTransform().a; // the canvas scale: device pixels per CSS pixel
+  const dpr = g.getTransform().a; // the canvas scale in device pixels per CSS pixel
   const z = Math.max(0, Math.min(maxZoom, Math.round(Math.log2((v.pxPerUnit * dpr * worldW) / info.tileSize))));
   const n = 2 ** z, w = worldW / n, h = worldH / n;
   // the game-unit rectangle the canvas shows, clipped to the playable area
@@ -78,7 +78,7 @@ export function drawTiles(g: CanvasRenderingContext2D, id: MapId, info: MapInfo,
   g.save();
   const [cl, ct] = v.toPx(info.bounds.minX, info.bounds.maxY), [cr, cb] = v.toPx(info.bounds.maxX, info.bounds.minY);
   g.beginPath(); g.rect(cl, ct, cr - cl, cb - ct); g.clip();
-  g.globalAlpha = tiles.opacity;
+  g.globalAlpha = opacity;
   if (tiles.style === 'gray') g.filter = 'grayscale(1)';
   for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) {
     const url = tileUrl(id, z, tx, ty);

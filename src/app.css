@@ -6,6 +6,7 @@
 
 @import '@fontsource/commit-mono/400.css';
 @import '@fontsource/commit-mono/700.css';
+@import '@fontsource/ibm-plex-mono/600.css';
 
 /* both fonts come from the system fonts and use the OFL (src/fonts/README.md) */
 @font-face {
@@ -102,6 +103,9 @@
   --stage: var(--bg); /* behind the video: the near-white page color */
 }
 
+/* the moving icons (@jis3r/icons) wrap their svg in a div: it sits in the line like the svg of a Lucide icon */
+div[role='img']:has(> svg) { display: inline-flex; flex: none; }
+
 /* Tailwind utilities (text-muted, bg-panel, border-line and others) that follow the theme */
 @theme inline {
   --color-bg: var(--bg);
@@ -125,6 +129,8 @@
   --font-mono: 'Commit Mono', ui-monospace, Menlo, Consolas, monospace;
   --font-small: 'VG5000', 'Commit Mono', ui-monospace, Menlo, Consolas, monospace;
   --font-display: 'Archivo Black', 'Arial Black', Impact, sans-serif;
+  /* the names of the window tabs */
+  --font-tab: 'IBM Plex Mono', 'Commit Mono', ui-monospace, Menlo, Consolas, monospace;
 }
 
 @layer base {
@@ -270,8 +276,8 @@
   .phasebar { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
   .tab {
     position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
-    padding: 0.5rem 1rem; border: 1px solid var(--line); background: var(--control-bg); cursor: pointer;
-    color: var(--muted); font-family: var(--font-small); font-weight: 400; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap;
+    padding: 0.3rem 0.8rem; border: 1px solid var(--line); background: var(--control-bg); cursor: pointer;
+    color: var(--muted); font-family: var(--font-small); font-weight: 400; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap;
     transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
   }
   .tab::after { content: ''; position: absolute; inset: auto -1px -1px -1px; height: 2px; background: var(--accent); transform: scaleX(0); transition: transform 220ms ease; }
@@ -280,6 +286,11 @@
   .tab[aria-pressed='true']::after { transform: scaleX(1); }
   /* a phase that is not open yet */
   .tab:disabled { cursor: not-allowed; opacity: 0.4; border-style: dashed; }
+  /* Review and its manual pages, Mark and Coordinates, in one group of the phase bar */
+  .phasegroup { display: inline-flex; align-items: center; gap: 2px; padding: 1px; border: 1px solid var(--line-strong); }
+  .phasegroup .tab { border-color: transparent; }
+  .phasegroup .tab[aria-pressed='true'] { border-color: var(--accent-border-active); }
+  .tab.sub { padding: 0.25rem 0.6rem; font-size: 11px; }
 
   /* ---------- data ---------- */
   .dl { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr); gap: 0.4rem 1.25rem; margin: 0; align-items: baseline; }
@@ -343,6 +354,16 @@
     box-shadow: 0 10px 40px #0000004d;
   }
   .pop::backdrop { background: #0d111680; }
+  /* number fields without the spinner of the browser; the arrow keys still step them */
+  input[type='number'] { appearance: textfield; -moz-appearance: textfield; }
+  input[type='number']::-webkit-inner-spin-button, input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  /* popups open with the tilt of src/lib/motion.ts (popIn): the popovers, and the dialogs */
+  .pop:popover-open, dialog[open] { animation: pop-in 0.2s ease; transform-origin: top center; }
+  @keyframes pop-in { from { opacity: 0; transform: perspective(2000px) rotateX(-30deg) scale(0.9); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .pop:popover-open, dialog[open] { animation: fade-in 0.1s ease-in-out; }
+  }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   /* a popover that drops down at the top right, under its button in the top bar */
   .pop.corner { margin: 3.75rem 0.5rem auto auto; }
   .pop.corner::backdrop { background: transparent; }
@@ -352,7 +373,31 @@
 
   /* the top bar */
   .navbar {
-    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; padding: 0.45rem 0.75rem;
+    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.3rem 0.6rem;
     background: var(--nav-bg); border: 1px solid var(--nav-border); border-top-color: var(--nav-highlight);
   }
+}
+
+/*
+ * The measure of a window body (lib/dock/fit.ts): its content at the smallest size that still shows it whole. Outside
+ * the layers, so it wins over the utilities while it lasts, which is one layout read.
+ */
+:root { --prose-min: 28ch; --scroll-min: 12lh; }
+.measure-w { width: min-content !important; right: auto !important; flex: none !important; }
+.measure-w * { white-space: nowrap; }
+.measure-w [data-prose] { white-space: normal; width: max-content; max-width: var(--prose-min); }
+.measure-w [data-prose='inline'] { display: inline-block; }
+.measure-w [data-row]:not([data-wrap]) { flex-wrap: nowrap; }
+.measure-w [data-shrink]:not([data-wrap]) { min-width: auto !important; }
+.measure-w [data-media] { width: 0 !important; }
+.measure-h { height: auto !important; bottom: auto !important; flex: none !important; }
+.measure-h [data-scroll-min] { height: auto !important; max-height: var(--scroll-min); }
+.measure-h [data-media] { width: var(--media-w, auto) !important; height: auto !important; min-height: 0 !important; flex: none !important; aspect-ratio: var(--aspect, 16 / 9); }
+
+/* the tooltip of the app (lib/tooltips.ts) */
+.tip {
+  position: fixed; z-index: 1000; max-width: min(36ch, calc(100vw - 12px)); padding: 4px 8px; pointer-events: none;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.4; color: var(--text);
+  background: var(--panel-solid); border: 1px solid var(--line-strong);
+  box-shadow: 0 1px 1px #00000005, 0 4px 8px -4px #0000001a, 0 16px 24px -8px #00000026;
 }

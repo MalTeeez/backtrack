@@ -1,9 +1,9 @@
 /**
- * Pitch and roll of the reference camera from the vertical lines of many frames (automation plan section 6,
- * Appendix A.2). OpenCV.js has no LSD: Canny and HoughLinesP find near-vertical candidates at half size, and each
- * candidate is refined at full size from the subpixel peaks of the horizontal gradient along it. Every line goes into
- * the reference camera with the rotation of its frame, where a vertical world line lies in a plane that holds the
- * world up vector u. A RANSAC over pairs of plane normals finds u; two halves of the frames give a second opinion.
+ * The pitch and roll of the reference camera from the vertical lines of many frames (automation plan section 6,
+ * Appendix A.2). OpenCV.js has no LSD. Instead, peaks of the horizontal gradient link into near-vertical chains at half
+ * size, and refine() moves each chain onto the subpixel peaks of the gradient at full size. Every line goes
+ * into the reference camera with the rotation of its frame, where a vertical world line lies in a plane that holds the
+ * world up vector u. A RANSAC over pairs of plane normals finds u. Two halves of the frames give a second opinion.
  */
 import { fixedMask } from './hud.ts';
 import { half, sample, type Gray8 } from './image.ts';
@@ -18,16 +18,15 @@ export const lastCandidates: number[][] = [];
 /** A refined line segment in frame pixels at full size. */
 export interface Segment { x1: number; y1: number; x2: number; y2: number; len: number; rms: number }
 
-/** The candidates of one frame: near-vertical (within 20 deg), at least 70 px long, outside the HUD. */
-
 /**
- * The candidates of one frame: near-vertical (within 20 deg), at least 70 px long, outside the HUD. On the half-size
- * frame, the peaks of the horizontal gradient (across a near-vertical edge) link from row to row with the same sign,
- * like a line segment detector that only looks for vertical lines; each chain is then refined at full size.
+ * Finds the candidates of one frame, which are near-vertical (within 20 deg), at least 70 px long, and outside the HUD.
+ * On the half-size frame, the peaks of the horizontal gradient (across a near-vertical edge) link from row to row with
+ * the same sign, like a line segment detector that only looks for vertical lines. Then refine() moves each chain onto
+ * the edge at full size.
  */
 export function verticalSegments(g: Gray8, maxTiltDeg = 20, minLen = 70): Segment[] {
   const h = half(g), mask = fixedMask(h.w, h.h), W = h.w, H = h.h, d = h.data;
-  // chains: label of each edge pixel, and per label its points
+  // the chains hold the label of each edge pixel and the points of each label
   const label = new Int32Array(W * H).fill(-1);
   const chains: { xs: number[]; ys: number[]; sign: number }[] = [];
   const gxAt = (i: number) => d[i - W + 1] + 2 * d[i + 1] + d[i + W + 1] - d[i - W - 1] - 2 * d[i - 1] - d[i + W - 1];
@@ -77,8 +76,8 @@ export function verticalSegments(g: Gray8, maxTiltDeg = 20, minLen = 70): Segmen
 }
 
 /**
- * Moves a candidate onto the edge: along it, every 2 rows, the subpixel peak of the horizontal gradient within 3 px,
- * then a line x = a + b y through the peaks without the ones that miss by more than 1 px.
+ * Moves a candidate onto the edge. Every 2 rows along it, it finds the subpixel peak of the horizontal gradient within
+ * 3 px. Then it fits a line x = a + b y through the peaks, without the ones that miss by more than 1 px.
  */
 function refine(g: Gray8, x1: number, y1: number, x2: number, y2: number): Segment | null {
   if (y2 < y1) [x1, y1, x2, y2] = [x2, y2, x1, y1];
@@ -92,11 +91,11 @@ function refine(g: Gray8, x1: number, y1: number, x2: number, y2: number): Segme
     for (let d = -3; d <= 3; d++) v.push(gx(xc + d, y));
     for (let k = 0; k < v.length; k++) if (Math.abs(v[k]) > bv) { bv = Math.abs(v[k]); best = k; }
     if (best <= 0 || best >= v.length - 1 || !(bv > 6)) continue;
-    // parabola through the peak and its neighbors
+    // a parabola through the peak and its neighbors
     const [l, m, r] = [Math.abs(v[best - 1]), bv, Math.abs(v[best + 1])], den = l - 2 * m + r;
     pts.push([y, xc + best - 3 + (den < 0 ? (0.5 * (l - r)) / den : 0), Math.sign(v[best])]);
   }
-  // an edge is dark to bright (or the other way) along its whole length: the sign of most rows
+  // an edge is dark to bright (or the other way) along its whole length, so it takes the sign of most rows
   const sign = Math.sign(pts.reduce((s, p) => s + p[2], 0)) || 1;
   const n0 = Math.floor((y2 - y1) / 2) + 1;
   let use = pts.filter((p) => p[2] === sign).map(([y, x]): [number, number] => [y, x]), fit = { a: 0, b: 0 };
@@ -107,7 +106,7 @@ function refine(g: Gray8, x1: number, y1: number, x2: number, y2: number): Segme
     for (const [y, x] of use) { sxy += (y - my) * (x - mx); syy += (y - my) ** 2; }
     const b = sxy / syy;
     fit = { a: mx - b * my, b };
-    // loose first: the first fit still holds the rows that missed the edge
+    // the first limit is loose, because the first fit still holds the rows that missed the edge
     use = use.filter(([y, x]) => Math.abs(x - (fit.a + fit.b * y)) < [2.5, 1.5, 1][it]);
   }
   if (use.length < Math.max(8, 0.5 * n0)) return null;
@@ -118,7 +117,7 @@ function refine(g: Gray8, x1: number, y1: number, x2: number, y2: number): Segme
   return { x1: xa, y1: ya, x2: xb, y2: yb, len: Math.hypot(xb - xa, yb - ya), rms };
 }
 
-/** Hough finds an edge more than once: keep the longest of segments that lie on the same line. */
+/** Hough finds an edge more than once. Of the segments that lie on the same line, this keeps the longest. */
 function dedupe(segs: Segment[]): Segment[] {
   const out: Segment[] = [];
   for (const s of [...segs].sort((a, b) => b.len - a.len)) {
@@ -133,11 +132,11 @@ function dedupe(segs: Segment[]): Segment[] {
 }
 
 export interface LineFit {
-  /** Pitch and roll of the reference camera (deg), and their standard deviations. */
+  /** The pitch and roll of the reference camera (deg), and their standard deviations. */
   pitch: number; roll: number; pitchSigma: number; rollSigma: number;
-  /** Lines used and found, and the frames they came from. */
+  /** The lines used and found, and the frames they came from. */
   used: number; total: number; frames: number;
-  /** The two halves of the frames, when both had enough lines: their pitch and roll. */
+  /** The pitch and roll of the two halves of the frames, when both had enough lines. */
   halves?: { pitch: number; roll: number }[];
   /** The world up vector in the reference camera. */
   u: V3;
@@ -151,8 +150,8 @@ interface Line { n: V3; len: number; a: V3; b: V3; frame: number }
 const LINE_DEG = 0.15;
 
 /**
- * The world up vector from plane normals: RANSAC over pairs, scored by the length of the inliers, then the smallest
- * eigenvector of the length-weighted normals.
+ * Finds the world up vector from plane normals. A RANSAC over pairs, scored by the length of the inliers, comes first,
+ * then the smallest eigenvector of the length-weighted normals.
  */
 function fitUp(lines: Line[], seed = 1): { u: V3; inl: Line[] } | null {
   if (lines.length < 2) return null;
@@ -165,7 +164,7 @@ function fitUp(lines: Line[], seed = 1): { u: V3; inl: Line[] } | null {
     const c = cross(lines[i].n, lines[j].n);
     if (Math.hypot(...c) < 1e-6) continue;
     const u = up(norm(c));
-    // a vertical world line leans toward image up: u must point up in the image
+    // a vertical world line leans toward image up, so u must point up in the image
     if (Math.abs(u[1]) < 0.3) continue;
     const score = lines.reduce((s, l) => s + (Math.abs(dot(l.n, u)) < sin ? l.len : 0), 0);
     if (!best || score > best.score) best = { u, score };
@@ -187,7 +186,7 @@ function fitUp(lines: Line[], seed = 1): { u: V3; inl: Line[] } | null {
 const anglesOfUp = (u: V3) => ({ pitch: Math.asin(Math.max(-1, Math.min(1, u[2]))) * R2D, roll: Math.atan2(u[0], -u[1]) * R2D });
 
 /**
- * Pitch and roll of the reference camera from the segments of several frames, each with the rotation of its frame
+ * The pitch and roll of the reference camera from the segments of several frames, each with the rotation of its frame
  * (b_frame = R b_ref).
  */
 export function fitPitchRoll(K: Intrinsics, frames: { segs: Segment[]; R: Mat3 }[]): LineFit | null {
@@ -199,8 +198,8 @@ export function fitPitchRoll(K: Intrinsics, frames: { segs: Segment[]; R: Mat3 }
       lines.push({ n: norm(cross(a, b)), len: s.len, a, b, frame });
     }
   });
-  // the game camera does not roll: the level fit comes first, and the fit with a roll only wins when it explains
-  // clearly more of the lines (a slanted structure, like a crane arm, otherwise pulls a roll into the fit)
+  // the game camera does not roll. Thus the level fit comes first, and the fit with a roll only wins when it explains
+  // clearly more of the lines. Otherwise, a slanted structure like a crane arm pulls a roll into the fit.
   const fit = (ls: Line[], seed = 1) => {
     const level = fitLevel(ls), free = fitUp(ls, seed);
     const score = (f: { inl: Line[] } | null) => (f ? f.inl.reduce((s, l) => s + l.len, 0) : 0);
@@ -210,14 +209,14 @@ export function fitPitchRoll(K: Intrinsics, frames: { segs: Segment[]; R: Mat3 }
   if (!all) return null;
   const { pitch, roll } = anglesOfUp(all.u);
   // the error from the misses of the lines, through the pitch sensitivity of each line. A line of one building shows
-  // in every frame, so the lines are not independent: count them once per frame.
+  // in every frame, so the lines are not independent, and the error counts them once per frame.
   const nf = new Set(all.inl.map((l) => l.frame)).size;
   const miss = all.inl.map((l) => dot(l.n, all.u));
   const rms = Math.sqrt(miss.reduce((s, x) => s + x * x, 0) / miss.length);
   const P = pitch * D2R, sens = all.inl.reduce((s, l) => s + (l.n[1] * Math.sin(P) + l.n[2] * Math.cos(P)) ** 2, 0);
   let pitchSigma = (rms / Math.sqrt(Math.max(sens, 1e-12) / Math.max(1, nf))) * R2D;
   let rollSigma = (rms / Math.sqrt(all.inl.length / Math.max(1, nf))) * R2D;
-  // two halves of the frames (in time): a large difference is a sign of a bad fit (section 6)
+  // split the frames into two halves in time. A large difference between them is a sign of a bad fit (section 6).
   const used = [...new Set(lines.map((l) => l.frame))].sort((a, b) => a - b);
   let halves: LineFit['halves'];
   if (used.length >= 2) {
@@ -239,8 +238,8 @@ export function fitPitchRoll(K: Intrinsics, frames: { segs: Segment[]; R: Mat3 }
 const ROLL_GAIN = 1.3;
 
 /**
- * The level camera (no roll): each line gives a pitch of its own, tan p = n_y / n_z. The pitch that most line length
- * agrees with (within LINE_DEG), then weighted least squares on those lines.
+ * Fits the level camera (no roll). Each line gives a pitch of its own, tan p = n_y / n_z. The fit takes the pitch that
+ * most line length agrees with (within LINE_DEG), then runs weighted least squares on those lines.
  */
 function fitLevel(lines: Line[]): { u: V3; inl: Line[] } | null {
   if (lines.length < 2) return null;

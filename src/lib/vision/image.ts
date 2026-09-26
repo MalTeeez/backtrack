@@ -7,7 +7,7 @@ export interface Rect { x: number; y: number; w: number; h: number }
 /** A mask image: 1 where the pixel counts, 0 where it does not. */
 export type Mask = Gray8;
 
-/** Half the size, each pixel the mean of 2 x 2. */
+/** Halves the size. Each pixel is the mean of 2 x 2. */
 export function half(g: Gray8): Gray8 {
   const w = g.w >> 1, h = g.h >> 1, out = new Uint8Array(w * h), s = g.data, W = g.w;
   for (let y = 0; y < h; y++) {
@@ -17,7 +17,7 @@ export function half(g: Gray8): Gray8 {
   return { data: out, w, h };
 }
 
-/** The value at a subpixel position, bilinear. Outside the image: NaN. */
+/** The bilinear value at a subpixel position, or NaN outside the image. */
 export function sample(g: { data: ArrayLike<number>; w: number; h: number }, x: number, y: number): number {
   if (x < 0 || y < 0 || x > g.w - 1 || y > g.h - 1) return NaN;
   const x0 = Math.min(g.w - 2, Math.floor(x)), y0 = Math.min(g.h - 2, Math.floor(y)), fx = x - x0, fy = y - y0, i = y0 * g.w + x0;

@@ -7,6 +7,13 @@ export const MC_RUNS = 40;
 /** The least error of an impact time (s), for an interval of zero width. */
 export const IMPACT_SIGMA_S = 1 / 120;
 
+/**
+ * The error of a walk from the minimap (Section.walk) has two parts. A speed error (m/s, one draw per clip and axis)
+ * grows with the time before the impact, and a position error (m) applies per sighting. The path is a quadratic through
+ * up to 16 positions that scatter by about 0.3 m on the standing test clips.
+ */
+const WALK_SPEED_SIGMA = 0.15, WALK_POS_SIGMA = 0.3;
+
 export type Rng = () => number;
 
 /** A deterministic, uniform [0, 1) generator for the tests and the benchmark. */
@@ -30,7 +37,7 @@ export function randn(rng: Rng): number {
  * the accuracy of the settings, and an impact time error (one draw per clip, anywhere in the impact interval).
  */
 export function makeJitter(st: Settings, rng: Rng): Jitter {
-  const impacts = new Map<Id, number>(), groups = new Map<string, number>();
+  const impacts = new Map<Id, number>(), groups = new Map<string, number>(), speeds = new Map<Id, [number, number]>();
   // one standard normal draw per group, so values of one fit move together
   const shared = (group: string | undefined) => {
     if (!group) return randn(rng);
@@ -44,6 +51,11 @@ export function makeJitter(st: Settings, rng: Rng): Jitter {
     impact: (clipId, half) => {
       if (!impacts.has(clipId)) impacts.set(clipId, half > 0 ? (2 * rng() - 1) * half : randn(rng) * IMPACT_SIGMA_S);
       return impacts.get(clipId)!;
+    },
+    walk: (clipId, tau) => {
+      if (!speeds.has(clipId)) speeds.set(clipId, [randn(rng) * WALK_SPEED_SIGMA, randn(rng) * WALK_SPEED_SIGMA]);
+      const [vx, vy] = speeds.get(clipId)!;
+      return [vx * tau + randn(rng) * WALK_POS_SIGMA, vy * tau + randn(rng) * WALK_POS_SIGMA];
     },
   };
 }

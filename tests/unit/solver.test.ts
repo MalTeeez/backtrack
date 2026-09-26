@@ -3,8 +3,8 @@ import { centered, dirTo, focalPx, pitchFromEdge, project, rayWorld } from '../.
 import { secondMinimum } from '../../src/lib/solver/ballisticFit.ts';
 import { independentDirection } from '../../src/lib/solver/independent.ts';
 import { BALLISTICS, landing, simulate } from '../../src/lib/solver/ballistics.ts';
-import { makeJitter, seeded } from '../../src/lib/solver/montecarlo.ts';
-import { fuse, solveProject } from '../../src/lib/solver/result.ts';
+import { makeJitter, randn, seeded } from '../../src/lib/solver/montecarlo.ts';
+import { frameTiming, fuse, solveProject } from '../../src/lib/solver/result.ts';
 import { EYE_HEIGHT_M, SightingSolver, craterGame } from '../../src/lib/solver/sightings.ts';
 import { solveShot } from '../../src/lib/solver/solve.ts';
 import { intersectTracks, minCrossingAngle } from '../../src/lib/solver/tracks.ts';
@@ -238,6 +238,19 @@ describe('project', () => {
       const O = wt.observerAt(data.sightings.find((x) => x.id === s.id)!.timeS);
       expect(Math.hypot(s.O[0] - O[0], s.O[1] - O[1])).toBeLessThan(2);
     }
+  });
+
+  test('the frame time error of a clip comes from its marks, without their own error', () => {
+    // 40 marks of the last 2 s with +/-1 px each: a frame time error of 30 ms reads as 30, none reads as the least
+    const rng = seeded(3), n = (s: number) => () => randn(rng) * s;
+    const est = (time: number) => {
+      const p = sceneProject(tr, { n: 40, last: 2, noise: { shellPx: n(1), time: n(time) } });
+      return frameTiming(p, new SightingSolver(p)).get('clip')!;
+    };
+    const runs = Array.from({ length: 9 }, () => est(0.03)).sort((a, b) => a - b);
+    expect(runs[4]).toBeGreaterThan(0.022);
+    expect(runs[4]).toBeLessThan(0.04);
+    expect(est(0)).toBeLessThan(0.006);
   });
 
   test('a shot left out of the calculation has no result', () => {

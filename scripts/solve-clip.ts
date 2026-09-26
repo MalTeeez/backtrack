@@ -11,7 +11,8 @@ import type { ProjectData, Shot } from '../src/lib/solver/types.ts';
 import { DEFAULT_SETTINGS } from '../tests/synthetic/project.ts';
 
 const a: Annotation = JSON.parse(readFileSync(process.argv[2], 'utf8'));
-const p: ProjectData = { settings: { ...DEFAULT_SETTINGS }, clips: {}, shots: [], sightings: [] };
+// the FOV is a setting of the user in the app; here the file is the only one who knows it
+const p: ProjectData = { settings: { ...DEFAULT_SETTINGS, fovDeg: a.settings.fovDeg, fovAxis: a.settings.fovAxis }, clips: {}, shots: [], sightings: [] };
 let n = 0;
 const make = { uid: () => `id${n++}`, shot: (k: number): Shot => ({ id: `shot${k}`, name: `Shot ${k}`, crater: {}, impact: {}, observer: {} }) };
 for (const note of applyAnnotation(p, 'clip', a, make, { width: a.clip.width, height: a.clip.height })) console.log(note);
@@ -24,5 +25,6 @@ for (const s of r.shots) {
   console.log(`${s.name}: direction ${s.fit.th.toFixed(1)} deg, gun ${g(s.gun!.x)}, ${g(s.gun!.y)}, range ${s.gun!.range.toFixed(0)} m, fit ${s.fit.rms.toFixed(2)} deg, err90 ${s.err90?.toFixed(0)} m, observer ${obs}${s.crater ? `, crater ${s.crater.x.toFixed(2)}, ${s.crater.y.toFixed(2)} +/-${s.crater.sigmaM.toFixed(0)} m` : ''}`);
   if (s.independent) console.log(`  straight flight over the last second: ${s.independent.dirDeg.toFixed(1)} deg (fit ${s.independent.rmsDeg.toFixed(2)} deg)`);
   if (s.observerOffM != null) console.log(`  minimap vs solved: ${s.observerOffM.toFixed(0)} m`);
+  if (s.timing) console.log(`  frame times +/-${(s.timing.s * 1000).toFixed(0)} ms (${s.timing.measured ? 'from the marks' : 'default'})`);
   for (const note of s.notes) console.log(`  - ${note}`);
 }

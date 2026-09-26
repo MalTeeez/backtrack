@@ -20,7 +20,7 @@ describe('missing', () => {
     expect(m.mark).toContain('Shot 1 has 1 sighting(s) without a shell mark.');
     expect(m.mark).toContain('Shot 1 has 1 sighting(s) and needs 2.');
     expect(m.mark).toContain('Shot 1 has no impact mark in 1 clip(s). Mark the frame where the shell lands.');
-    expect(m.coordinates).toEqual(['The crater of Shot 1 has no X and Y, and where you stood is not known either.']);
+    expect(m.coordinates).toEqual(['The crater of Shot 1 has no X and Y, and the sighting position is not known either.']);
   });
 
   test('a phase opens only when every phase before it is done', () => {

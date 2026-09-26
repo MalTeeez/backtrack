@@ -1,9 +1,9 @@
 /**
- * The shell candidates on the GPU (WebGPU compute): the same steps as bandCandidates in shell.ts, over the whole frame
- * at once. It follows OpenCV where the result depends on it: the Gaussian kernel sizes (8 sigma + 1 for floats), the
- * reflect-101 border of the blurs and the Sobel, block means for the 1/8 size, OpenCV's bilinear upsampling, and a
- * dilation that ignores pixels outside the frame. The frames stay on the GPU; only the candidates come back.
- * shellCandidates falls back to the CPU when there is no GPU.
+ * The shell candidates on the GPU (WebGPU compute). It runs the same steps as bandCandidates in shell.ts, over the
+ * whole frame at once. It follows OpenCV where the result depends on it: the Gaussian kernel sizes (8 sigma + 1 for
+ * floats), the reflect-101 border of the blurs and the Sobel, block means for the 1/8 size, OpenCV's bilinear
+ * upsampling, and a dilation that ignores pixels outside the frame. The frames stay on the GPU, and only the
+ * candidates come back. shellCandidates falls back to the CPU when there is no GPU.
  */
 import type { Candidate } from './shell.ts';
 import { toRef } from './rotation.ts';
@@ -11,7 +11,7 @@ import type { Gray8 } from './image.ts';
 import type { Intrinsics, Mat3 } from './rotation.ts';
 
 let device: Promise<GPUDevice | null> | null = null;
-/** The GPU, once; null without WebGPU. */
+/** The GPU device, created once, or null without WebGPU. */
 export function gpuDevice(): Promise<GPUDevice | null> {
   device ??= (async () => {
     const gpu = (globalThis.navigator as Navigator & { gpu?: GPU })?.gpu;
@@ -27,7 +27,7 @@ export function gpuDevice(): Promise<GPUDevice | null> {
   return device;
 }
 
-/** An OpenCV Gaussian kernel for float images: size 8 sigma + 1 (odd), normalized. */
+/** A normalized OpenCV Gaussian kernel for float images, of size 8 sigma + 1 (odd). */
 export function gaussKernel(sigma: number): Float32Array {
   const n = Math.round(sigma * 8 + 1) | 1, r = (n - 1) / 2, k = new Float32Array(n);
   let sum = 0;
@@ -41,11 +41,11 @@ struct Dims { w: u32, h: u32, n: u32, layer: u32 }
 fn r101(i: i32, n: i32) -> i32 { if (i < 0) { return -i; } if (i >= n) { return 2 * n - 2 - i; } return i; }
 `;
 
-/** The warped value of frame `layer` at a reference pixel: bilinear, 0 outside the frame, rounded as an 8-bit warp. */
+/** The bilinear warped value of frame `layer` at a reference pixel, 0 outside the frame, rounded as an 8-bit warp. */
 const WARP = /* wgsl */ `
 @group(0) @binding(0) var frames: texture_2d_array<f32>;
 @group(0) @binding(1) var<uniform> dims: Dims;
-@group(0) @binding(2) var<storage, read> homs: array<mat3x3<f32>>; // per frame: reference pixel to frame pixel
+@group(0) @binding(2) var<storage, read> homs: array<mat3x3<f32>>; // per frame, from reference pixel to frame pixel
 fn px(x: i32, y: i32, l: u32) -> f32 {
   if (x < 0 || y < 0 || x >= i32(dims.w) || y >= i32(dims.h)) { return 0.0; }
   return textureLoad(frames, vec2<i32>(x, y), i32(l), 0).r * 255.0;
@@ -84,7 +84,7 @@ const WARP_ONE = COMMON + WARP + /* wgsl */ `
   out[g.y * dims.w + g.x] = warped(g.x, g.y, dims.layer);
 }`;
 
-/** A separable filter along x or y: Gaussian (weights) or max. mode: 0 blur of src, 1 blur of bg - src, 2 max. */
+/** A separable Gaussian (weights) or max filter along x or y. Mode 0 blurs src, 1 blurs bg - src, and 2 takes the max. */
 const LINE = COMMON + /* wgsl */ `
 struct Line { w: u32, h: u32, axis: u32, mode: u32, r: i32 }
 @group(0) @binding(0) var<uniform> P: Line;
@@ -189,8 +189,9 @@ fn off(l: f32, m: f32, r: f32) -> f32 { let den = l - 2.0 * m + r; if (den >= 0.
 }`;
 
 /**
- * The candidates of every frame on the GPU: frames as a texture array (HUD pixels already 0 by the caller), the
- * homographies from the reference camera into each frame, the mask of the fixed HUD, and the thresholds of A.3.
+ * Finds the candidates of every frame on the GPU. It takes the frames as a texture array (the caller already set the HUD
+ * pixels to 0), the homographies from the reference camera into each frame, the mask of the fixed HUD, and the
+ * thresholds of A.3.
  */
 export async function gpuCandidates(dev: GPUDevice, frames: (Gray8 | null)[], Rs: (Mat3 | null)[], K: Intrinsics, mask: Gray8, o: { minScore: number; border: number; window: number }): Promise<Candidate[]> {
   const idx = frames.map((f, i) => (f && Rs[i] ? i : -1)).filter((i) => i >= 0);
@@ -208,7 +209,7 @@ export async function gpuCandidates(dev: GPUDevice, frames: (Gray8 | null)[], Rs
     const b = buf(a.byteLength, U); dev.queue.writeBuffer(b, 0, a); return b;
   };
   try {
-    // the frames, one layer each; rows of a texture upload are multiples of 256 bytes
+    // each frame gets one layer. The rows of a texture upload are multiples of 256 bytes.
     const tex = dev.createTexture({ size: [W, H, N], format: 'r8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
     const row = Math.ceil(W / 256) * 256;
     idx.forEach((i, l) => {
@@ -216,7 +217,7 @@ export async function gpuCandidates(dev: GPUDevice, frames: (Gray8 | null)[], Rs
       if (row !== W) { const p = new Uint8Array(row * H); for (let y = 0; y < H; y++) p.set(data.subarray(y * W, y * W + W), y * row); data = p; }
       dev.queue.writeTexture({ texture: tex, origin: [0, 0, l] }, data.buffer as ArrayBuffer, { offset: data.byteOffset, bytesPerRow: row, rowsPerImage: H }, [W, H, 1]);
     });
-    // reference pixel to frame pixel: the inverse of toRef, column-major for WGSL
+    // the map from reference pixel to frame pixel is the inverse of toRef, column-major for WGSL
     const homs = new Float32Array(N * 12);
     idx.forEach((i, l) => {
       const M = invert3(toRef(K, Rs[i]!));
@@ -244,7 +245,7 @@ export async function gpuCandidates(dev: GPUDevice, frames: (Gray8 | null)[], Rs
     const kern = new Map<number, GPUBuffer>();
     const kOf = (sigma: number) => { if (!kern.has(sigma)) kern.set(sigma, upload(gaussKernel(sigma))); return kern.get(sigma)!; };
     const none = upload(new Float32Array(4));
-    /** A separable filter: Gaussian of src (mode 0) or of bg - src (mode 1), or a max (mode 2) of half size r. */
+    /** A separable filter, a Gaussian of src (mode 0) or of bg - src (mode 1), or a max (mode 2) of half size r. */
     const sep = (src: GPUBuffer, dst: GPUBuffer, tmp: GPUBuffer, w: number, h: number, mode: 0 | 1 | 2, sigmaOrR: number) => {
       const k = mode === 2 ? none : kOf(sigmaOrR), r = mode === 2 ? sigmaOrR : (gaussKernel(sigmaOrR).length - 1) / 2;
       run(pLine, [uniform([w, h, 0, mode, r]), src, bg, k, tmp], w, h);
@@ -254,7 +255,7 @@ export async function gpuCandidates(dev: GPUDevice, frames: (Gray8 | null)[], Rs
     const dims = (layer = 0) => uniform([W, H, N, layer]);
 
     run(pMedian, [dims(), homBuf, bg], W, H, view);
-    // texture: Sobel magnitude, blur sigma 2, dilate 9 x 9
+    // the texture is the Sobel magnitude, blurred with sigma 2 and dilated 9 x 9
     run(pSobel, [dims(), bg, a], W, H);
     sep(a, b, texF, W, H, 0, 2);
     sep(b, texF, a, W, H, 2, 4);

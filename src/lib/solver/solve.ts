@@ -3,7 +3,7 @@ import { fitBallistic } from './ballisticFit.ts';
 import { D2R } from './camera.ts';
 import type { Ray, ShotSolution, SolveOptions, Vec3 } from './types.ts';
 
-/** The fewest sightings a shot needs: each gives two angles, for the direction, elevation and observer shift. */
+/** The fewest sightings a shot needs. Each sighting gives two angles, for the direction, elevation and observer shift. */
 export const NEEDED = 2;
 
 export function solveShot(rays: Ray[], C: Vec3, opt: SolveOptions): ShotSolution {
@@ -13,7 +13,7 @@ export function solveShot(rays: Ray[], C: Vec3, opt: SolveOptions): ShotSolution
   const search = (strict: boolean, ground: boolean) =>
     fitBallistic(opt.ballistics, rays, { C, zGun: opt.zGun, lo, hi, range: strict ? [opt.rmin, opt.rmax] : null, ground: ground ? opt.ground : undefined, near: opt.near, priors: opt.priors });
 
-  // first with the range limit and the terrain, then without the range limit, and last without the terrain
+  // The search runs first with the range limit and the terrain, then without the range limit, and last without the terrain.
   let rangeApplied = opt.useRange, fit = search(rangeApplied, true);
   if (!fit && rangeApplied) { rangeApplied = false; fit = search(false, true); }
   if (!fit && opt.ground) {

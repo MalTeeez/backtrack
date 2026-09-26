@@ -1,8 +1,8 @@
 /**
- * Weapon ballistics: gravity and quadratic drag, a = -k * |v| * v - g. The launch speeds come from the WARDOGS wiki
- * (wardogs.wikitactics.com). Each drag constant k makes the maximum range match the community firing tables, and the
- * flight times then agree with the published ones (L52 at 2000 m: 12.3 s low and 33 s high; L81 at 400 m: 17.4 s).
- * Bulkhead has not published these values, so they are community estimates.
+ * The weapon ballistics model gravity and quadratic drag, a = -k * |v| * v - g. The launch speeds come from the
+ * WARDOGS wiki (wardogs.wikitactics.com). Each drag constant k makes the maximum range match the community firing
+ * tables, and the flight times then agree with the published ones. The L52 at 2000 m flies 12.3 s low and 33 s high,
+ * and the L81 at 400 m flies 17.4 s. Bulkhead did not publish these values, so they are community estimates.
  */
 
 import type { Weapon } from './types.ts';
@@ -51,7 +51,7 @@ export function simulate(b: Ballistics, eDeg: number, floor = -600): Flight {
   return { e: eDeg, x: xs.subarray(0, i), z: zs.subarray(0, i) };
 }
 
-/** Where the flight comes down through height dz: its range R and flight time T. Null if it never gets there. */
+/** Where the flight comes down through height dz, as its range R and flight time T. Null if it never gets there. */
 export function landing(f: Flight, dz: number): { R: number; T: number } | null {
   let top = 0;
   for (let i = 1; i < f.z.length; i++) if (f.z[i] > f.z[top]) top = i;
@@ -65,14 +65,14 @@ export function landing(f: Flight, dz: number): { R: number; T: number } | null 
   return null;
 }
 
-/** Horizontal distance and height at time t after launch (clamped to the flight). */
+/** The horizontal distance and the height at time t after the launch (clamped to the flight). */
 export function at(f: Flight, t: number): { x: number; z: number } {
   const u = Math.max(0, Math.min(f.x.length - 1.000001, t / DT));
   const i = Math.floor(u), a = u - i;
   return { x: f.x[i] + a * (f.x[i + 1] - f.x[i]), z: f.z[i] + a * (f.z[i + 1] - f.z[i]) };
 }
 
-/** Height of the flight at horizontal distance x. The horizontal distance only grows, so a binary search finds it. */
+/** The height of the flight at horizontal distance x. The horizontal distance only grows, so a binary search finds it. */
 export function heightAt(f: Flight, x: number): number {
   let lo = 0, hi = f.x.length - 1;
   if (x <= 0) return f.z[0];

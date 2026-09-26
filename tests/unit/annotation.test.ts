@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { annotation, applyAnnotation, oneClipPerShot } from '../../src/lib/capture/annotation.ts';
+import { annotation, applyAnnotation, oneClipPerShot, shotFlow } from '../../src/lib/capture/annotation.ts';
 import type { ClipMeta, ProjectData, Shot } from '../../src/lib/solver/types.ts';
 import { sceneProject } from '../synthetic/project.ts';
 import { makeScene } from '../synthetic/scene.ts';
@@ -135,5 +135,19 @@ describe('annotation files', () => {
   test('marks from a video of another size get a note', () => {
     const notes = applyAnnotation(empty(), 'imported', annotation(sceneProject(tr, { n: 2 }), clip)!, make, { width: 1920, height: 1080 });
     expect(notes.some((x) => x.includes('this video is 1920x1080'))).toBe(true);
+  });
+
+  test('a shot belongs to the flow that worked on it, and the file keeps that flow', () => {
+    const p = sceneProject(tr, { n: 2 });
+    const sh = p.shots[0];
+    expect(shotFlow(p, sh)).toBe('manual'); // it has sightings
+    expect(shotFlow(p, { ...sh, id: 'none', impact: {} })).toBeUndefined();
+    p.clips.clip = { map: {}, pending: [{ a: 1, b: 2, shotId: 'sec' }] };
+    expect(shotFlow(p, { ...sh, id: 'sec', impact: {} })).toBe('auto');
+    sh.flow = 'auto';
+    sh.shared = true;
+    const back = empty();
+    applyAnnotation(back, 'clip', annotation(p, clip)!, make, { width: tr.W, height: tr.H });
+    expect(back.shots[0]).toMatchObject({ flow: 'auto', shared: true });
   });
 });

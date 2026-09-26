@@ -1,12 +1,12 @@
-/** The annotation file of a clip: its export from the project and its import back. Deterministic, without I/O. */
+/** The annotation file of a clip, with its export from the project and its import back. Deterministic, without I/O. */
 import { sameFrame } from '../video/frames.ts';
 import { WEAPONS } from '../solver/ballistics.ts';
-import type { ClipData, ClipMeta, Id, ProjectData, Settings, Shot, Sighting } from '../solver/types.ts';
+import type { ClipData, ClipMeta, Field, Id, ProjectData, Settings, Shot, Sighting } from '../solver/types.ts';
 
 export const FORMAT = 'backtrack-annotation';
 /**
- * Version 2 stores every value that Backtrack can detect as a field: the user's value, and the automatic value with
- * its sigma and confidence (automation plan section 3). The app reads only this version.
+ * Version 2 stores every value that Backtrack can detect as a field, which holds the user's value and the automatic
+ * value with its sigma and confidence (automation plan section 3). The app reads only this version.
  */
 export const VERSION = 2;
 
@@ -15,14 +15,27 @@ export interface Annotation {
   format: typeof FORMAT;
   version: number;
   clip: Omit<ClipMeta, 'id'>;
-  /** What the project knows about the clip: its map. */
+  /** What the project knows about the clip, which is its map. */
   data?: ClipData;
   settings: Pick<Settings, 'fovDeg' | 'fovAxis' | 'weapon' | 'rangeMinM' | 'rangeMaxM' | 'limitToRange'>;
-  shots: (Pick<Shot, 'name' | 'crater' | 'rangefinder' | 'sourceDeg' | 'sourceTolDeg' | 'excluded'> & {
+  shots: (Pick<Shot, 'name' | 'crater' | 'rangefinder' | 'sourceDeg' | 'sourceTolDeg' | 'craterRaisedM' | 'excluded' | 'flow' | 'shared'> & {
     impact: Shot['impact'][Id] | null;
     observer: Shot['observer'][Id] | null;
+    raisedM?: Field<number>;
   })[];
   sightings: (Omit<Sighting, 'id' | 'clipId' | 'shotId'> & { shot: string | null })[];
+}
+
+/**
+ * The flow a shot belongs to (see Shot.flow). A shot without a flow belongs to the automatic flow when it has a
+ * section, to the manual flow when it has a sighting or an impact, and to neither while it holds nothing.
+ */
+export function shotFlow(p: ProjectData, s: Shot): 'auto' | 'manual' | undefined {
+  if (s.flow) return s.flow;
+  const c = s.clipId ? p.clips[s.clipId] : undefined;
+  if (c?.sections?.some((x) => x.shotId === s.id) || c?.pending?.some((x) => x.shotId === s.id)) return 'auto';
+  if (p.sightings.some((x) => x.shotId === s.id) || Object.values(s.impact).some((f) => f.manual ?? f.auto)) return 'manual';
+  return undefined;
 }
 
 /** Everything the project knows about one clip, or null when the clip has no marks or impact. */
@@ -51,7 +64,12 @@ export function annotation(p: ProjectData, clip: ClipMeta): Annotation | null {
     shots: shots.map((s) => ({
       name: names.get(s.id)!, crater: s.crater, rangefinder: s.rangefinder, sourceDeg: s.sourceDeg, sourceTolDeg: s.sourceTolDeg,
       impact: s.impact[clip.id] ?? null, observer: s.observer[clip.id] ?? null,
+      ...(s.raisedM?.[clip.id] ? { raisedM: s.raisedM[clip.id] } : {}),
+      ...(s.craterRaisedM != null ? { craterRaisedM: s.craterRaisedM } : {}),
       ...(s.excluded ? { excluded: true } : {}),
+      // the flow keeps the shots of the automatic flow and of marking by hand apart
+      ...(shotFlow(p, s) ? { flow: shotFlow(p, s) } : {}),
+      ...(s.shared ? { shared: true } : {}),
     })),
     sightings: sightings
       .sort((a, b) => a.timeS - b.timeS)
@@ -60,8 +78,9 @@ export function annotation(p: ProjectData, clip: ClipMeta): Annotation | null {
 }
 
 /**
- * Adds the marks of an annotation to the project, for the clip `clipId`. Shots match by name within that clip, and a
- * missing shot is made in it. The project settings stay, unless the project has no sightings yet. Returns notes for the user.
+ * Adds the marks of an annotation to the project, for the clip `clipId`. Shots match by name within that clip, and the
+ * import makes a missing shot in it. The project settings stay, unless the project has no sightings yet. Returns notes
+ * for the user.
  */
 export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make: { uid: () => Id; shot: (n: number) => Shot }, video: { width: number; height: number }): string[] {
   const notes: string[] = [];
@@ -75,7 +94,7 @@ export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make:
   }
   // the FOV is a setting of the user (prefs.svelte.ts), not of a file
   if (s.fovDeg !== p.settings.fovDeg || s.fovAxis !== p.settings.fovAxis) {
-    notes.push(`The file used a FOV of ${s.fovDeg} deg (${s.fovAxis === 'h' ? 'horizontal' : 'vertical'}). The settings say ${p.settings.fovDeg} deg: change them if the file is right.`);
+    notes.push(`The file used a FOV of ${s.fovDeg} deg (${s.fovAxis === 'h' ? 'horizontal' : 'vertical'}). The settings say ${p.settings.fovDeg} deg. Change them if the file is right.`);
   }
 
   // the map of the clip, unless the user already picked one
@@ -86,7 +105,7 @@ export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make:
     // a shot belongs to one clip, so a name only matches a shot of this clip
     let shot = p.shots.find((x) => x.clipId === clipId && x.name === f.name);
     if (!shot) {
-      // a new project starts with an empty "Shot 1" in no clip: fill it instead of adding a second one
+      // a new project starts with an empty "Shot 1" in no clip, so fill it instead of adding a second one
       const taken = new Set(shotIds.values());
       const unused = p.shots.find((x) => !taken.has(x.id) && freeShot(p, x));
       shot = unused ?? make.shot(p.shots.length + 1);
@@ -99,11 +118,15 @@ export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make:
     if (shot.sourceTolDeg == null && f.sourceTolDeg != null) shot.sourceTolDeg = f.sourceTolDeg;
     if (f.impact) shot.impact[clipId] = structuredClone(f.impact);
     if (f.observer) shot.observer[clipId] = structuredClone(f.observer);
+    if (f.raisedM) (shot.raisedM ??= {})[clipId] = structuredClone(f.raisedM);
+    if (shot.craterRaisedM == null && f.craterRaisedM != null) shot.craterRaisedM = f.craterRaisedM;
     if (f.excluded) shot.excluded = true;
+    if (f.flow && !shot.flow) shot.flow = f.flow;
+    if (f.shared) shot.shared = true;
     shotIds.set(f.name, shot.id);
   }
 
-  // a sighting without a known shot goes to the first shot of the file, or a new one: never to a shot of another clip
+  // a sighting without a known shot goes to the first shot of the file, or to a new one, never to a shot of another clip
   const fileShot = () => {
     const first = [...shotIds.values()][0];
     if (first) return first;
@@ -115,7 +138,7 @@ export function applyAnnotation(p: ProjectData, clipId: Id, a: Annotation, make:
   let otherSize = 0, again = 0;
   for (const x of a.sightings) {
     const shotId = (x.shot != null && shotIds.get(x.shot)) || fileShot();
-    // the same file imported twice: a sighting of this shot on this frame is already there
+    // when the same file is imported twice, a sighting of this shot on this frame is already there
     if (p.sightings.some((y) => y.clipId === clipId && y.shotId === shotId && sameFrame(y.timeS, x.timeS))) { again++; continue; }
     if (x.frameW !== video.width || x.frameH !== video.height) otherSize++;
     const { shot: _, ...rest } = structuredClone(x);
@@ -133,14 +156,15 @@ export const clipsOfShot = (p: ProjectData, s: Shot) =>
 /** A shot with no crater yet. */
 export const blankShot = (s: Shot) => s.crater.manual == null && s.crater.auto == null && !s.rangefinder;
 
-/** A new shot that no clip has taken yet: the first clip takes it instead of making another one. */
+/** A new shot that no clip has taken yet. The first clip takes it instead of making another one. */
 export const freeShot = (p: ProjectData, s: Shot) => s.clipId == null && !clipsOfShot(p, s).size && blankShot(s);
 
 /**
  * A shot belongs to one clip for now. Projects from before shots stored their clip get it here, from their marks. An
  * older import merged shots of the same name from several clips, so this splits such a shot into one shot per clip.
  * The new shots get no crater or suspected heading, because the merge kept only those of the first clip. It also
- * drops shots that a deleted clip left behind: in no clip, but with a crater. Returns the names of the new shots.
+ * drops shots that a deleted clip left behind, which are in no clip but have a crater. Returns the names of the new
+ * shots.
  */
 export function oneClipPerShot(p: ProjectData, make: { uid: () => Id }): string[] {
   const made: string[] = [];

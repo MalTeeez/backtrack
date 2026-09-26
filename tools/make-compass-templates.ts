@@ -154,8 +154,8 @@ const { templates } = train(sure, adv);
 const body = templates.map((t) => `  [${t.map((v) => v.toFixed(4)).join(', ')}],`).join('\n');
 const labelBody = trainLabels(sure).map((t) => `  [${t.map((v) => v.toFixed(4)).join(', ')}],`).join('\n');
 await Bun.write(join(ROOT, 'src', 'lib', 'video', 'compassTemplates.ts'), `/**
- * Digit templates of the compass reader (compass.ts): the mean features of each digit 0 to 9 (edges, dark ring and white fill, each on a ${GRID.cols} x ${GRID.rows} grid), and
- * the width of each digit in 2160p pixels. tools/make-compass-templates.ts writes this file from ${sure.length} frames of ${clip}.
+ * The digit templates of the compass reader (compass.ts). They hold the mean features of each digit 0 to 9 (edges,
+ * dark ring and white fill, each on a ${GRID.cols} x ${GRID.rows} grid) and the width of each digit in 2160p pixels. tools/make-compass-templates.ts writes this file from ${sure.length} frames of ${clip}.
  */
 export const ADVANCE: number[] = [${adv.join(', ')}];
 

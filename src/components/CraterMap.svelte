@@ -1,9 +1,9 @@
 <script lang="ts">
   /**
-   * Picks a crater on a map in game coordinates: the downloaded map image when there is one, a grid, and the crater
-   * with a ring every 500 m of the weapon range and the suspected heading. The wheel zooms, a drag pans, and a click
-   * sets the crater X and Y. With `onpick`, a click picks another point instead (where the user stood for a sighting),
-   * which the map shows as `observer`, with the walk of the detection when the user walked.
+   * Picks a crater on a map in game coordinates. The map draws the downloaded map image when there is one, a grid,
+   * and the crater with a ring every 500 m of the weapon range and the suspected heading. The wheel zooms, a drag
+   * pans, and a click sets the crater X and Y. With `onpick`, a click picks the sighting position instead. The map
+   * shows it as `observer`, with the walk of the detection when the user walked.
    */
   import { compassRose, css } from './mark/draw.ts';
   import { drawTiles, mapInfo } from '../lib/map/tiles.svelte.ts';
@@ -17,10 +17,10 @@
   import { craterGame } from '../lib/solver/sightings.ts';
 
   let { viewId, shot, reachM, onpick, observer, solved }: {
-    /** Where the view is kept (ui.mapViews): the shot for the crater, the shot and "obs" for where the user stood. */
+    /** The key of the view in ui.mapViews. It is the shot for the crater, and the shot and "obs" for the sighting position. */
     viewId: Id; shot: Shot; reachM: number;
     onpick?: (p: { x: number; y: number }) => void; observer?: { x?: number; y?: number } | null;
-    /** The crater the solver found from where the user stood (automation plan section 11), drawn as a ring. */
+    /** The crater the solver found from the sighting position (automation plan section 11), drawn as a ring. */
     solved?: { x: number; y: number };
   } = $props();
   // the map of the clip of the shot, unless this panel shows another one (automation plan section 4)
@@ -55,7 +55,7 @@
   let loadedInfo = $state<Awaited<ReturnType<typeof mapInfo>>>(null);
   $effect(() => { let live = true; info.then((i) => { if (live) loadedInfo = i; }); return () => { live = false; }; });
 
-  // the view: center and span (game units across the shorter side). It starts on the crater, wide enough for the
+  // the view has a center and a span (game units across the shorter side). It starts on the crater, wide enough for the
   // weapon range, and the wheel and drags change it.
   const fit = () => ({ cx: seen?.x ?? crater?.x ?? solved?.x ?? 80, cy: seen?.y ?? crater?.y ?? solved?.y ?? 80, span: onpick ? 6 : (reachM * 2.2) / 100 || 30 });
   // the map opens where the user left it
@@ -103,7 +103,7 @@
       g.beginPath(); g.arc(px, py, 6, 0, 7); g.fill(); g.stroke();
     }
     if (solved && !crater) {
-      // the crater the solver found: a ring, until the user gives one
+      // the crater the solver found shows as a ring until the user gives one
       const [px, py] = toPx(solved.x, solved.y);
       g.strokeStyle = css('--impact'); g.lineWidth = 2.5;
       g.beginPath(); g.arc(px, py, 7, 0, 7); g.stroke();
@@ -117,7 +117,7 @@
       g.strokeStyle = css('--accent'); g.lineWidth = 2; path();
     }
     if (seen) {
-      // where the user stood: a triangle, as on the result map
+      // the sighting position shows as a triangle, as on the result map
       const [px, py] = toPx(seen.x, seen.y);
       g.fillStyle = css('--accent'); g.strokeStyle = '#000'; g.lineWidth = 1.5;
       g.beginPath(); g.moveTo(px, py - 9); g.lineTo(px + 8, py + 6); g.lineTo(px - 8, py + 6); g.closePath(); g.fill(); g.stroke();
@@ -149,7 +149,7 @@
     e.preventDefault();
     const p = toGame(e), k = e.deltaY > 0 ? 1.25 : 0.8;
     const span = Math.max(0.3, Math.min(200, view.span * k));
-    // zoom around the pointer: the game point under it stays under it
+    // zoom around the pointer, so the game point under it stays under it
     view = { span, cx: p.x - (p.x - view.cx) * (span / view.span), cy: p.y - (p.y - view.cy) * (span / view.span) };
   }
 </script>
@@ -159,8 +159,8 @@
     bind:this={canvas}
     class="block w-full touch-none border border-line bg-bg {press?.moved ? 'cursor-grabbing' : 'cursor-crosshair'}"
     style="height:{H}px"
-    aria-label={onpick ? 'Map to pick where you stood' : `Map to pick the crater of ${shot.name}`}
-    title={onpick ? 'The wheel zooms, a drag pans, and a click sets where you stood.' : 'The wheel zooms, a drag pans, and a click sets the crater.'}
+    aria-label={onpick ? 'Map to pick the sighting position' : `Map to pick the crater of ${shot.name}`}
+    title={onpick ? 'The wheel zooms, a drag pans, and a click sets the sighting position.' : 'The wheel zooms, a drag pans, and a click sets the crater.'}
     onpointerdown={down}
     onpointermove={move}
     onpointerup={up}
@@ -170,7 +170,7 @@
   <span class="pointer-events-none absolute right-1.5 top-1 border border-line bg-panel px-1.5 text-[11px] text-muted">
     {hover ? `X ${hover.x.toFixed(2)}  Y ${hover.y.toFixed(2)}` : 'X -  Y -'}{zoom ? `  Zoom ${zoom}` : ''}
   </span>
-  <button class="btn sm absolute left-1.5 top-1" onclick={() => (view = fit())} title="Back to the crater and the weapon range">Fit</button>
+  <button class="btn sm absolute left-1.5 top-1" onclick={() => (view = fit())} title="Go back to the crater and the weapon range">Fit</button>
   <div class="absolute bottom-1.5 right-1.5"><MapStyle /></div>
   {#if map}
     <div class="absolute bottom-1.5 left-1.5 w-36" title="Shows another map in this panel only. The map of the clip stays.">

@@ -10,7 +10,10 @@
 
   let { time, sighting, pending, compass, onimpact, onclear }: {
     time: number; sighting: Sighting | undefined; pending: boolean; onimpact: () => void; onclear: () => void;
-    /** The compass heading read from the frame on screen: null when it cannot be read, undefined while reading. */
+    /**
+     * The compass heading that Backtrack reads from the frame on screen. It is null when Backtrack cannot read it, and
+     * undefined during the reading.
+     */
     compass: number | null | undefined;
   } = $props();
 
@@ -41,7 +44,7 @@
     <dl class="dl min-w-0 text-[12px]" data-testid="impact-status">
       <dt>Impact</dt>
       {#if impact != null}
-        <dd class="num flex flex-wrap items-center gap-x-2" title="Between the last clean frame {interval!.a.toFixed(3)} s and the first frame of the impact {interval!.b.toFixed(3)} s">
+        <dd class="num flex flex-wrap items-center gap-x-2" title="The impact lies between the last clean frame at {interval!.a.toFixed(3)} s and the first frame of the impact at {interval!.b.toFixed(3)} s.">
           {impact.toFixed(3)} +/-{impactSigma(interval!).toFixed(3)} s
           <FieldTag kind="impact" {field} onreset={() => field && (field.manual = undefined)} fmt={(v) => `${impactTime(v as never).toFixed(3)} s`} />
         </dd>
@@ -54,7 +57,7 @@
       <dt>Compass</dt>
       <!-- a fixed box, so the spinner and the value take the same space. The rows line up on the text baseline, so the
            spinner comes with an invisible character that gives it one, or the row would move while it spins. -->
-      <dd class="num inline-flex h-[1.5em] w-[5.5em] items-center whitespace-nowrap" data-testid="compass" title="Read from the compass at the top of the frame. A new sighting takes it as its heading.">
+      <dd class="num inline-flex h-[1.5em] w-[5.5em] items-center whitespace-nowrap" data-testid="compass" title="Backtrack reads this from the compass at the top of the frame. A new sighting takes it as its heading.">
         {#if compass === undefined}<span aria-hidden="true">&#8203;</span><Spinner size={11} />{:else if compass === null}-{:else}{compass} deg{/if}
       </dd>
     </dl>

@@ -8,7 +8,7 @@ import type { ProjectData } from '../solver/types.ts';
 
 export const solved: { result: ProjectResult | null; solving: boolean; error: string } = $state({ result: null, solving: false, error: '' });
 
-/** Everything the solver reads, as a string: equal strings give equal results. */
+/** Everything the solver reads, as a string. Equal strings give equal results. */
 function inputsKey(p: ProjectData) {
   const { bufferS: _b, bitrateMbps: _r, ...settings } = p.settings;
   return JSON.stringify([settings, p.shots, p.sightings]);

@@ -16,21 +16,31 @@
   },
   "dependencies": {
     "@fontsource/commit-mono": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@jis3r/icons": "2.9.0",
     "@lucide/svelte": "^1.34.0",
     "@sveltejs/vite-plugin-svelte": "7.3.0",
     "@tailwindcss/vite": "4.3.3",
     "@techstark/opencv-js": "4.12.0-release.1",
+    "camera-controls": "3.1.2",
     "idb": "^8.0.0",
     "mediabunny": "1.56.1",
     "svelte": "5.56.9",
     "tailwindcss": "4.3.3",
+    "three": "0.186.0",
     "vite": "8.2.2"
   },
   "devDependencies": {
+    "@panth977/agentation-svelte": "0.1.2",
     "@playwright/test": "1.63.0",
     "@types/bun": "1.4.2",
+    "@types/three": "0.186.0",
     "@webgpu/types": "0.1.72",
+    "sass": "1.104.1",
     "svelte-check": "4.7.6",
     "typescript": "~6"
+  },
+  "patchedDependencies": {
+    "@panth977/agentation-svelte@0.1.2": "patches/agentation-svelte@0.1.2.patch"
   }
 }

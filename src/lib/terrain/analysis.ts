@@ -1,6 +1,6 @@
 /**
- * What the terrain says beyond heights: how steep the ground is where the gun might stand, and where the gun can hit.
- * Everything works in meters on a synchronous ground function (Terrain.heightNow after a preload). The terrain has no
+ * What the terrain says beyond heights. It tells how steep the ground is where the gun might stand, and where the gun
+ * can hit. Everything works in meters on a synchronous ground function (Terrain.heightNow after a preload). The terrain has no
  * buildings or trees, so a safe zone behind a house does not show.
  */
 import { flights, heightAt, landing, simulate, type Ballistics } from '../solver/ballistics.ts';
@@ -32,11 +32,11 @@ export function slopeGrid(ground: GroundAt, x0: number, y0: number, x1: number, 
 export const REACH = { none: 0, low: 1, high: 2, safe: 3 } as const;
 
 /**
- * Where the guns can hit: each fires shells in every direction (0.4 deg apart) and at every elevation (0.1 deg apart)
- * over the terrain, and marks the cell where each one comes down. Cells in range of a gun that no shell reaches are
- * out of reach. `low` means a shell below the elevation of the longest range reaches the cell; `high` means only
- * steeper ones. A small jump between neighboring elevations fills the cells between; a large jump is a ridge with a
- * shadow behind it. With several guns, a cell is as reachable as the gun that reaches it best.
+ * Where the guns can hit. Each gun fires shells in every direction (0.4 deg apart) and at every elevation (0.1 deg
+ * apart) over the terrain, and marks the cell where each shell comes down. Cells in range of a gun that no shell
+ * reaches are out of reach. `low` means that a shell below the elevation of the longest range reaches the cell, and
+ * `high` means that only steeper ones do. A small jump between neighboring elevations fills the cells between. A large
+ * jump is a ridge with a shadow behind it. With several guns, a cell is as reachable as the gun that reaches it best.
  */
 export function reach(ground: GroundAt, b: Ballistics, guns: { x: number; y: number }[], rmax: number, cell = 20): Grid | null {
   const placed = guns.map((g) => ({ ...g, z: ground(g.x, g.y) })).filter((g): g is { x: number; y: number; z: number } => g.z != null);
@@ -55,7 +55,7 @@ export function reach(ground: GroundAt, b: Ballistics, guns: { x: number; y: num
   for (const f of flights(b, 0.5)) { const r = landing(f, 0)?.R ?? 0; if (r > best) { best = r; eMax = f.e; } }
   // a mortar only fires above that elevation, so all of its arcs count as one kind
   const oneKind = eMax <= b.elevMinDeg + 0.5;
-  // each flight as its height every STEP meters, so the fan needs no flight twice and keeps little memory
+  // Each flight keeps its height every STEP meters, so the fan needs no flight twice and keeps little memory.
   const steps = Math.ceil(R / STEP);
   const arcs: { low: boolean; z: Float32Array }[] = [];
   for (let e = b.elevMinDeg; e <= b.elevMaxDeg + 1e-9; e += 0.1) {
@@ -63,7 +63,7 @@ export function reach(ground: GroundAt, b: Ballistics, guns: { x: number; y: num
     for (let k = 0; k < steps; k++) z[k] = heightAt(f, k * STEP);
     arcs.push({ low: oneKind || e < eMax, z });
   }
-  // a mark never makes a cell safer: low beats high, and high beats out of reach
+  // A mark never makes a cell safer. Low beats high, and high beats out of reach.
   const mark = (x: number, y: number, low: boolean) => {
     const k = idx(x, y);
     if (k < 0 || grid.data[k] === REACH.none) return;

@@ -1,12 +1,17 @@
 /**
- * Where the HUD of WARDOGS sits (automation plan section 5.2 and Appendix A.6). The layout is measured at 3840x2160
- * and scales with the frame height; the minimap stays at the left edge and the compass in the middle.
+ * The position of the HUD of WARDOGS (automation plan section 5.2 and Appendix A.6). The layout is measured at
+ * 3840x2160 and scales with the frame height. The minimap stays at the left edge and the compass in the middle.
  */
 import type { Mask, Rect } from './image.ts';
 
-/** The minimap crop at 2160p, and the player arrow in it. */
-const MINIMAP = { x0: 52, y0: 1470, x1: 470, y1: 1845 };
-export const ARROW = { x: 268.5, y: 247.2 };
+/**
+ * The minimap crop at 2160p, and the player arrow in it. The crop is the whole map part of the minimap, from its edges
+ * in the test clips, with the NAV text at the bottom right (which minimap.ts masks). The arrow sits in its middle.
+ */
+const MINIMAP = { x0: 64, y0: 1488, x1: 576, y1: 1952 };
+export const ARROW = { x: 256.5, y: 229.2 };
+/** The height of the minimap crop at 2160p, to scale the arrow to a crop of another frame height. */
+export const MINIMAP_H = MINIMAP.y1 - MINIMAP.y0;
 
 export function minimapRegion(w: number, h: number): Rect & { s: number } {
   const s = h / 2160;
@@ -14,8 +19,8 @@ export function minimapRegion(w: number, h: number): Rect & { s: number } {
 }
 
 /**
- * The fixed mask: the minimap, and the compass strip at the top, whose labels move with the heading but not like the
- * world. Every other HUD element stands still, and the stabilization finds it per section.
+ * The fixed mask covers the minimap and the compass strip at the top, whose labels move with the heading but not like
+ * the world. Every other HUD element stands still, and the stabilization finds it per section.
  */
 export function fixedMask(w: number, h: number): Mask {
   const s = h / 2160, m = new Uint8Array(w * h).fill(1);

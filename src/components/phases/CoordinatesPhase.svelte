@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { Plus, Trash2 } from '@lucide/svelte';
+  import Plus from '@jis3r/icons/icons/plus';
+  import Trash2 from '@jis3r/icons/icons/trash-2';
   import Info from '../Info.svelte';
   import NumInput from '../NumInput.svelte';
+  import Checkbox from '../Checkbox.svelte';
   import FieldTag from '../FieldTag.svelte';
   import UseToggle from '../UseToggle.svelte';
   import CraterMap from '../CraterMap.svelte';
@@ -13,7 +15,7 @@
   import type { Field, Id, Shot, Weapon, XY } from '../../lib/solver/types.ts';
 
   const st = $derived(project.settings);
-  // the shots of the clip picked in Mark: a shot belongs to one clip for now
+  // the shots of the clip picked in Mark. A shot belongs to one clip for now.
   const shown = $derived(shotsOf(ui.clipId));
   const clipName = $derived(clips.list.find((c) => c.id === ui.clipId)?.name);
   const count = (id: Id) => project.sightings.filter((s) => s.shotId === id).length;
@@ -24,8 +26,8 @@
   const fmtXY = (p: unknown) => { const q = p as XY; return `${q.x.toFixed(2)}, ${q.y.toFixed(2)}`; };
 
   /**
-   * One coordinate of a point field: the value the solver uses, and a typed value that makes it the user's. `make`
-   * gives the field for writing, made on first use.
+   * One coordinate of a point field. It reads the value the solver uses, and a typed value makes the field the user's.
+   * `make` gives the field for writing and creates it on first use.
    */
   const coord = (f: Field<XY> | undefined, make: () => Field<XY>, k: 'x' | 'y') => ({
     get: () => round(value(f)?.[k]),
@@ -34,10 +36,10 @@
       w.manual = v == null ? undefined : k === 'x' ? { x: v, y: other ?? v } : { x: other ?? v, y: v };
     },
   });
-  /** Where the user stood during a shot, as a field made on first use. */
+  /** The sighting position of a shot, as a field made on first use. */
   const observer = (s: Shot) => { s.observer[s.clipId!] ??= {}; return s.observer[s.clipId!]; };
 
-  /** Switches a crater between X and Y and a rangefinder reading, and keeps where it was as X and Y. */
+  /** Switches a crater between X and Y and a rangefinder reading. A switch back to X and Y keeps the crater position. */
   function setRangefinder(s: Shot, on: boolean) {
     if (on === !!s.rangefinder) return;
     const at = craterGame(s);
@@ -63,7 +65,7 @@
         <h2 class="card-title">Craters{clipName ? ` of ${clipName}` : ''}</h2>
         <Info label="Craters">
           <p>Walk to the crater after the impact and read its X and Y from the game map, or click it on the map. 1 unit is 100 m.</p>
-          <p>Where you stood comes from the minimap. With it, the crater is optional: the solver finds it from the end of the flight.</p>
+          <p>The sighting position comes from the minimap. With it, the crater is optional, because the solver finds it from the end of the flight.</p>
           <p><em>Suspected heading</em> is the compass heading from the crater toward the gun, if you have an idea of it. The solver then looks only within the tolerance around it. Leave it empty to search all directions.</p>
         </Info>
         <span class="card-meta"><button class="btn sm" onclick={addShot}><Plus size={12} /> Add</button></span>
@@ -72,23 +74,23 @@
         {#each shown as s (s.id)}
           {@const r = resultOf(s.id)}
           {@const obs = s.clipId ? s.observer[s.clipId] : undefined}
-          <div class="flex flex-col gap-1.5 border-b border-line pb-3 last:border-b-0 last:pb-0">
+          <div class="flex flex-col gap-1.5 border-b border-line last:pb-0">
             <div class="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-end gap-1.5">
               <label class="flex min-w-0 flex-col gap-1"><span class="label truncate">Shot ({count(s.id)} sightings)</span><input class="control" bind:value={s.name} /></label>
               <button class="option justify-center px-2" aria-pressed={mapShown(s, r)} onclick={() => (ui.mapOpen[s.id] = !mapShown(s, r))}>Map</button>
-              <span class="grid h-[30px] place-items-center px-1"><UseToggle target={s} what="this shot" /></span>
+              <span class="grid h-7.5 place-items-center px-1"><UseToggle target={s} what="this shot" /></span>
               <button class="btn icon" aria-label="Delete {s.name}" onclick={() => deleteShot(s.id)}><Trash2 size={13} /></button>
             </div>
-            <div class="grid w-fit grid-cols-2 gap-1" role="group" aria-label="How the crater is given">
+            <div class="grid w-fit grid-cols-2 gap-1" role="group" aria-label="How you give the crater">
               <button class="option min-h-0 justify-center px-2 py-1 text-[11px]" aria-pressed={!s.rangefinder} onclick={() => setRangefinder(s, false)} title="The X and Y of the crater from the game map">X / Y</button>
-              <button class="option min-h-0 justify-center px-2 py-1 text-[11px]" aria-pressed={!!s.rangefinder} onclick={() => setRangefinder(s, true)} title="Where you stood, and the heading and distance of the crater through binoculars or a rangefinder">Rangefinder</button>
+              <button class="option min-h-0 justify-center px-2 py-1 text-[11px]" aria-pressed={!!s.rangefinder} onclick={() => setRangefinder(s, true)} title="The position of the rangefinder reading, and the heading and distance of the crater through binoculars or a rangefinder">Rangefinder</button>
             </div>
             {#if s.rangefinder}
               {@const from = s.rangefinder}
               {@const at = craterGame(s)}
               <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                <NumInput label="Your X" bind:value={from.x} step={0.01} />
-                <NumInput label="Your Y" bind:value={from.y} step={0.01} />
+                <NumInput label="Rangefinder X" bind:value={from.x} step={0.01} />
+                <NumInput label="Rangefinder Y" bind:value={from.y} step={0.01} />
                 <NumInput label="Heading" unit="deg" bind:value={from.headingDeg} step={0.5} min={0} />
                 <NumInput label="Distance" unit="m" bind:value={from.distanceM} step={1} min={0} />
               </div>
@@ -102,23 +104,28 @@
               </div>
               {#if value(s.crater) || s.crater.auto}<FieldTag kind="crater" field={s.crater} fmt={fmtXY} onreset={() => (s.crater.manual = undefined)} />{/if}
               {#if r?.crater}
-                <p class="m-0 text-[11.5px] text-muted" data-testid="solved-crater" title="From where you stood and the end of the flight (automation plan section 11)">
-                  Solved from where you stood: <span class="num text-text">X {r.crater.x.toFixed(2)}  Y {r.crater.y.toFixed(2)}</span> +/-{r.crater.sigmaM.toFixed(0)} m
+                <p class="m-0 text-[11.5px] text-muted" data-testid="solved-crater" title="From the sighting position and the end of the flight (automation plan section 11)">
+                  Solved from the sighting position: <span class="num text-text">X {r.crater.x.toFixed(2)}  Y {r.crater.y.toFixed(2)}</span> +/-{r.crater.sigmaM.toFixed(0)} m
                 </p>
               {/if}
             {/if}
             {#if s.clipId}
               {@const ox = coord(obs, () => observer(s), 'x')}
               {@const oy = coord(obs, () => observer(s), 'y')}
-              <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-1.5" title="Where you stood during the flight, from the minimap. The solver weighs it against the sightings.">
-                <NumInput label="You stood at X" step={0.01} placeholder="minimap" bind:value={ox.get, ox.set} />
-                <NumInput label="You stood at Y" step={0.01} placeholder="minimap" bind:value={oy.get, oy.set} />
-                <button class="option h-[30px] justify-center px-2 text-[11px]" aria-pressed={!!ui.mapOpen[`${s.id}:obs`]} onclick={() => (ui.mapOpen[`${s.id}:obs`] = !ui.mapOpen[`${s.id}:obs`])} title="Pick where you stood on the map">Map</button>
+              <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-1.5" title="The sighting position during the flight, from the minimap. The solver weighs it against the sightings.">
+                <NumInput label="Sighting position X" step={0.01} placeholder="minimap" bind:value={ox.get, ox.set} />
+                <NumInput label="Sighting position Y" step={0.01} placeholder="minimap" bind:value={oy.get, oy.set} />
+                <button class="option h-7.5 justify-center px-2 text-[11px]" aria-pressed={!!ui.mapOpen[`${s.id}:obs`]} onclick={() => (ui.mapOpen[`${s.id}:obs`] = !ui.mapOpen[`${s.id}:obs`])} title="Pick the sighting position on the map">Map</button>
               </div>
               {#if obs && (value(obs) || obs.auto)}<FieldTag kind="observer" field={obs} fmt={fmtXY} required="optional" onreset={() => (observer(s).manual = undefined)} />{/if}
               {#if ui.mapOpen[`${s.id}:obs`]}
                 <CraterMap viewId={`${s.id}:obs`} shot={s} reachM={st.rangeMaxM} observer={value(obs)} onpick={(q) => (observer(s).manual = q)} />
               {/if}
+              {@const clip = s.clipId}
+              <div class="grid grid-cols-2 gap-1.5" title="The terrain data lacks hesco walls, vehicles, and built blocks. A few meters move the gun by tens of meters.">
+                <NumInput label="Sighting position above ground" unit="m" step={0.1} placeholder="0" bind:value={() => s.raisedM?.[clip]?.manual, (v) => { (s.raisedM ??= {})[clip] ??= {}; s.raisedM[clip].manual = v; }} />
+                <NumInput label="Crater above ground" unit="m" step={0.1} placeholder="0" bind:value={() => s.craterRaisedM, (v) => (s.craterRaisedM = v)} />
+              </div>
             {/if}
             <div class="grid grid-cols-2 gap-1.5">
               <div class="flex min-w-0 flex-col gap-0.5">
@@ -148,7 +155,7 @@
 
     <section class="card">
       <header class="card-head">
-        <h2 class="card-title" title="The solver uses the ballistics of the weapon: launch speed and drag from community data, not from Bulkhead.">Weapon</h2>
+        <h2 class="card-title" title="The solver uses the ballistics of the weapon. The launch speed and drag come from community data, not from Bulkhead.">Weapon</h2>
         {#if weapon}<span class="card-meta"><FieldTag kind="weapon" field={weapon.field} fmt={(w) => WEAPONS[w as Weapon].name} /></span>{/if}
       </header>
       <div class="card-body flex flex-col gap-2">
@@ -170,7 +177,7 @@
             <NumInput required label="Max range" unit="m" bind:value={() => st.rangeMaxM, (v) => (st.rangeMaxM = v!)} />
           </div>
         {/if}
-        <label class="flex items-center gap-1.5 text-copy"><input type="checkbox" bind:checked={st.limitToRange} /> Keep results inside the weapon range</label>
+        <Checkbox bind:checked={st.limitToRange}>Keep results inside the weapon range</Checkbox>
       </div>
     </section>
 

@@ -1,20 +1,20 @@
 /**
- * The independent model (automation plan section 12.6, Appendix B): a straight flight with gravity over the last part
- * of the flight, fitted to the rays without the weapon table. It gives the direction toward the gun, not the range:
- * the rays fix mainly the ratio of distance and speed. A second opinion on the direction of the ballistic fit.
- * Deterministic, without I/O.
+ * The independent model (automation plan section 12.6, Appendix B) fits a straight flight with gravity over the last
+ * part of the flight to the rays, without the weapon table. It gives the direction toward the gun, not the range,
+ * because the rays fix mainly the ratio of distance and speed. It gives a second opinion on the direction of the
+ * ballistic fit. Deterministic, without I/O.
  */
 import { R2D, wrap360 } from './camera.ts';
 import type { Ray, Vec3 } from './types.ts';
 
 const G = 9.81;
 
-/** Unknowns: azimuth and elevation (rad) of the impact from the camera, its distance (m), and the velocity (m/s). */
+/** The unknowns are the azimuth and elevation (rad) of the impact from the camera, its distance (m), and the velocity (m/s). */
 type P = [number, number, number, number, number, number];
 
 const dir = (az: number, el: number): Vec3 => [Math.sin(az) * Math.cos(el), Math.cos(az) * Math.cos(el), Math.sin(el)];
 
-/** The misses: for each ray, the cross product of the unit vector to the modeled shell and the ray. */
+/** The misses. The miss of a ray is the cross product of the unit vector to the modeled shell and the ray. */
 function residuals(p: P, rays: { D: Vec3; tau: number }[]): number[] {
   const u = dir(p[0], p[1]), d = p[2], V = [p[3], p[4], p[5]];
   const out: number[] = [];
@@ -71,8 +71,9 @@ function fit(p0: P, rays: { D: Vec3; tau: number }[]): { p: P; cost: number } {
 }
 
 /**
- * The direction (deg, clockwise from north) from the impact toward the gun: the opposite of the horizontal velocity at
- * the impact. Starts from several distances (10, 30, 80 and 200 m) and keeps the best fit. Null for fewer than 4 rays.
+ * The direction (deg, clockwise from north) from the impact toward the gun, which is the opposite of the horizontal
+ * velocity at the impact. The fit starts from several distances (10, 30, 80 and 200 m) and keeps the best result. Null
+ * for fewer than 4 rays.
  */
 export function independentDirection(rays: Pick<Ray, 'D' | 'tau'>[]): { dirDeg: number; rmsDeg: number } | null {
   if (rays.length < 4) return null;

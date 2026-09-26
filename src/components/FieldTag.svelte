@@ -1,10 +1,10 @@
 <script lang="ts">
   /**
-   * The state of a value that Backtrack can detect (automation plan section 2): automatic with its confidence,
-   * required with the reason, or manual with the automatic value next to it, a warning when they differ, and a
-   * button that goes back to the automatic value.
+   * Shows the state of a value that Backtrack can detect (automation plan section 2). The state is automatic with its
+   * confidence, required with the reason, or manual. A manual value has the automatic value next to it, a warning
+   * when they differ, and a button that goes back to the automatic value.
    */
-  import { RotateCcw } from '@lucide/svelte';
+  import RotateCcw from '@jis3r/icons/icons/rotate-ccw';
   import { autoValue, fieldState, fieldWarning, type Kind, type Kinds } from '../lib/solver/field.ts';
   import type { Field } from '../lib/solver/types.ts';
 
@@ -12,7 +12,7 @@
     kind: Kind; field: Field<Kinds[Kind]> | undefined; fmt: (v: Kinds[Kind]) => string;
     /** The text of the required state. */
     required?: string;
-    /** Drops the user's value, so the automatic one counts again. Without it, no reset button. */
+    /** Drops the user's value, so the automatic one counts again. Without it, the tag has no reset button. */
     onreset?: () => void;
   } = $props();
 
@@ -27,7 +27,7 @@
     <span class="tag accent px-1 py-0" title="Found by Backtrack, {pct} percent sure. Type a value to override it.">auto {pct}%</span>
   {:else if state === 'required'}
     <span class="tag warn px-1 py-0" title={field?.auto?.reason ?? (field?.auto ? `Backtrack is only ${pct} percent sure` : 'Backtrack found no value')}>{required}</span>
-    {#if field?.auto?.value !== undefined}<span class="num text-muted" title="The automatic value, too unsure to count">({fmt(field.auto.value)}?)</span>{/if}
+    {#if field?.auto?.value !== undefined}<span class="num text-muted" title="The automatic value, which is too unsure to count">({fmt(field.auto.value)}?)</span>{/if}
   {:else}
     <span class="tag {state === 'warned' ? 'warn' : ''} px-1 py-0" title={warning ?? 'Your value'}>{state === 'warned' ? 'differs' : 'manual'}</span>
     {#if auto !== undefined}

@@ -2,7 +2,7 @@
  * The path model for the weapon ballistics (ballistics.ts). The unknowns are the direction from the crater to the gun
  * (th) and the launch elevation (e). Together they fix the gun position (the landing range behind the crater) and the
  * position of the shell at every moment of the flight. The impact time of each sighting says where on the flight the
- * shell was. Where the user stood near the crater follows from each candidate flight (observerShift).
+ * shell was. The sighting position near the crater follows from each candidate flight (observerShift).
  */
 import { at, flightAt, flights, heightAt, landing, type Ballistics, type Flight } from './ballistics.ts';
 import { D2R, R2D, angleDiff, wrap360 } from './camera.ts';
@@ -12,28 +12,30 @@ import type { Fit, GroundAt, Id, Ray, ShiftPrior, Vec3 } from './types.ts';
 const RAY_SIGMA = 1e-3;
 
 /**
- * The ground shift (m) of the observer that brings the rays closest to the shell points P, by least squares on the
- * distance of each point from its ray, across the path of the shell and (with less weight) along it. The rays start at
- * the crater, and the user stood near it, but not on it. A prior (where the minimap puts the user) pulls the shift
- * toward itself with its own error.
+ * The shift (m) of the observer that brings the rays closest to the shell points P, by least squares on the distance
+ * of each point from its ray, across the path of the shell and (with less weight) along it. The rays start at the
+ * crater, and the user stood near it, but not on it. A prior (the sighting position from the minimap) pulls the ground
+ * shift toward itself with its own error. The height stays fixed. When the fit solved it with a prior, it found 0.5 m
+ * for a user 5 m above the terrain data on synthetic data. Thus the user gives the height above the ground
+ * (Shot.raisedM).
  */
 export function observerShift(rays: Ray[], P: Vec3[], prior?: ShiftPrior): [number, number] {
-  let a = 0, b = 0, d = 0, u = 0, w = 0;
-  /** Adds the direction e (unit, across the ray) with the weight k: the miss of the point along e is (q - s) . e. */
+  // the normal equations N s = h of the shift s
+  const N = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], h = [0, 0, 0];
+  /** Adds the direction e (unit, across the ray) with the weight k. The miss of the point along e is (q - s) . e. */
   const add = (e: number[], k: number, q: number[]) => {
     const eq = e[0] * q[0] + e[1] * q[1] + e[2] * q[2];
-    a += k * e[0] * e[0]; b += k * e[0] * e[1]; d += k * e[1] * e[1];
-    u += k * e[0] * eq; w += k * e[1] * eq;
+    for (let i = 0; i < 3; i++) { h[i] += k * e[i] * eq; for (let j = 0; j < 3; j++) N[i][j] += k * e[i] * e[j]; }
   };
   const qs = rays.map((r, i) => [P[i][0] - r.O[0], P[i][1] - r.O[1], P[i][2] - r.O[2]]);
   // every ray counts the same, in meters of the typical miss, so a prior (in meters) weighs right against them. A
   // weight per ray by its own miss in meters (its angular error times its distance) trusts the rays near the observer
-  // too much: on the benchmark it doubled the gun error with frame time errors of 30 ms.
+  // too much. On the benchmark, it doubled the gun error with frame time errors of 30 ms.
   const miss = rays.map((r, i) => (r.sigma ?? RAY_SIGMA) * Math.hypot(qs[i][0], qs[i][1], qs[i][2])).sort((x, y) => x - y);
   const k0 = 1 / Math.max(0.05, miss[miss.length >> 1] ?? 1) ** 2;
   rays.forEach((r, i) => {
     const D = r.D, q = qs[i];
-    // along the path, a ray counts less by its larger error there: an uncertain frame time moves it along the path
+    // Along the path, a ray counts less by its larger error there, because an uncertain frame time moves it along the path.
     const sc = r.sigma ?? RAY_SIGMA, k = (sig: number) => k0 * (sc / sig) ** 2;
     if (r.along) {
       // along the path of the shell and across it
@@ -41,40 +43,41 @@ export function observerShift(rays: Ray[], P: Vec3[], prior?: ShiftPrior): [numb
       add(c, k(sc), q);
       add(t, k(r.sigmaAlong ?? sc), q);
     } else {
-      // M = I - D D^T keeps the part across the ray. The shift moves only x and y.
-      const kk = k(sc), dq = D[0] * q[0] + D[1] * q[1] + D[2] * q[2];
-      a += kk * (1 - D[0] * D[0]); b -= kk * D[0] * D[1]; d += kk * (1 - D[1] * D[1]);
-      u += kk * (q[0] - D[0] * dq); w += kk * (q[1] - D[1] * dq);
+      // the two directions across the ray
+      const e1 = Math.abs(D[2]) < 0.9 ? [-D[1], D[0], 0] : [0, -D[2], D[1]], n1 = Math.hypot(e1[0], e1[1], e1[2]);
+      const u = [e1[0] / n1, e1[1] / n1, e1[2] / n1], v = [D[1] * u[2] - D[2] * u[1], D[2] * u[0] - D[0] * u[2], D[0] * u[1] - D[1] * u[0]];
+      add(u, k(sc), q); add(v, k(sc), q);
     }
   });
   if (prior) {
     const k = 1 / (prior.sigma * prior.sigma);
-    a += k; d += k; u += k * prior.s[0]; w += k * prior.s[1];
+    N[0][0] += k; N[1][1] += k; h[0] += k * prior.s[0]; h[1] += k * prior.s[1];
   }
-  const det = a * d - b * b;
-  return Math.abs(det) < 1e-18 ? [0, 0] : [(u * d - b * w) / det, (a * w - b * u) / det];
+  const det = N[0][0] * N[1][1] - N[0][1] * N[1][0];
+  return Math.abs(det) < 1e-18 ? [0, 0] : [(h[0] * N[1][1] - N[0][1] * h[1]) / det, (N[0][0] * h[1] - N[1][0] * h[0]) / det];
 }
 
 interface Candidate { th: number; f: Flight; R: number; T: number }
 
 /**
- * The scale (rad) of the robust cost the search minimizes: a miss up to about this counts like a square, a larger one
- * grows only with its logarithm (Cauchy). A sighting whose frame time is off (the recording skipped frames) misses
+ * The scale (rad) of the robust cost the search minimizes. A miss up to about this counts like a square, and a larger
+ * one grows only with its logarithm (Cauchy). A sighting whose frame time is off (the recording skipped frames) misses
  * the true flight by far, and with squares it would pull the fit toward itself.
  */
 const ROBUST = 0.3 * D2R;
 
 /**
- * The miss (m) that the positions (minimap, the spot near the crater) and the flight model explain on their own. Near
- * the impact the shell is only tens of meters away, so such a miss is several degrees there and says nothing about
- * the FOV, the headings or the marks.
+ * The miss (m) that the positions (the minimap, the sighting position near the crater) and the flight model explain on
+ * their own. Near the impact the shell is only tens of meters away, so such a miss is several degrees there and says
+ * nothing about the FOV, the headings or the marks.
  */
 const MODEL_M = 10;
 
 /**
- * The observer shift of each clip, and the error of the rays against one candidate flight: the angular RMS (deg), the
- * RMS miss (m), the RMS of the angle beyond what a miss of MODEL_M explains (deg), and the robust cost the search
- * minimizes, where each miss counts in units of the error of its ray (`w` scales each ray, section 12.5).
+ * The observer shift of each clip, and the error of the rays against one candidate flight. The error holds the angular
+ * RMS (deg), the RMS miss (m), the RMS of the angle beyond what a miss of MODEL_M explains (deg), and the robust cost
+ * the search minimizes. In that cost, each miss counts in units of the error of its ray (`w` scales each ray, section
+ * 12.5).
  */
 function evaluate(c: Candidate, clips: Map<Id, Ray[]>, n: number, C: Vec3, zGun: number, w: Map<Ray, { cross: number; along: number }>, priors?: Record<Id, ShiftPrior>) {
   const th = c.th * D2R, dx = Math.sin(th), dy = Math.cos(th);
@@ -96,9 +99,9 @@ function evaluate(c: Candidate, clips: Map<Id, Ray[]>, n: number, C: Vec3, zGun:
 }
 
 /**
- * The miss of a ray that starts shifted by (ox, oy) against the shell point P: the angle `a` (rad) and the distance
- * `len` (m), and with the path direction of the ray, the miss split along the path of the shell (`al`, signed: ahead
- * of the mark is positive) and across it (`cr`, unsigned).
+ * The miss of a ray that starts shifted by (ox, oy), relative to the shell point P. It gives the angle `a` (rad) and
+ * the distance `len` (m). With the path direction of the ray, it also splits the miss along the path of the shell
+ * (`al`, signed, positive ahead of the mark) and across it (`cr`, unsigned).
  */
 function rayMiss(r: Ray, P: Vec3, ox: number, oy: number) {
   const v = [P[0] - r.O[0] - ox, P[1] - r.O[1] - oy, P[2] - r.O[2]];
@@ -111,8 +114,9 @@ function rayMiss(r: Ray, P: Vec3, ox: number, oy: number) {
 }
 
 /**
- * Each ray against a fit, for the pictures of the result: where the user was on its frame (O, with the shift of its
- * clip), the shell on the fitted flight at that moment (P), and the miss (deg) along the path of the shell and across it.
+ * Each ray against a fit, for the pictures of the result. A ray gives the sighting position on its frame (O, with the
+ * shift of its clip), the shell on the fitted flight at that moment (P), and the miss (deg) along the path of the shell
+ * and across it.
  */
 export function rayMisses(b: Ballistics, fit: Fit, rays: Ray[], C: Vec3, zGun: number) {
   const th = fit.th * D2R, dx = Math.sin(th), dy = Math.cos(th), f = flightAt(b, fit.e);
@@ -123,10 +127,19 @@ export function rayMisses(b: Ballistics, fit: Fit, rays: Ray[], C: Vec3, zGun: n
   });
 }
 
+/** The fitted flight as n points from the gun to the impact, each with its time before the impact (s). */
+export function flightPath(b: Ballistics, fit: Fit, C: Vec3, zGun: number, n = 80): { tau: number; P: Vec3 }[] {
+  const th = fit.th * D2R, dx = Math.sin(th), dy = Math.cos(th), f = flightAt(b, fit.e);
+  return Array.from({ length: n }, (_, k) => {
+    const t = (k / (n - 1)) * fit.T, p = at(f, t);
+    return { tau: fit.T - t, P: [C[0] + fit.R * dx - p.x * dx, C[1] + fit.R * dy - p.x * dy, zGun + p.z] as Vec3 };
+  });
+}
+
 /**
- * The scales of each ray in the cost, across the path of the shell and along it: the median error of the rays over
- * its own, so a typical ray keeps the scale ROBUST and a larger error (a vague mark; a fast shell with an uncertain
- * frame time, along its path) counts less.
+ * The scales of each ray in the cost, across the path of the shell and along it. Each scale is the median error of the
+ * rays over the error of the ray. Thus a typical ray keeps the scale ROBUST, and a larger error counts less. A vague
+ * mark has a larger error, and so does a fast shell with an uncertain frame time, along its path.
  */
 function rayScales(rays: Ray[]): Map<Ray, { cross: number; along: number }> {
   const sig = rays.map((r) => r.sigma ?? RAY_SIGMA), ref = [...sig].sort((a, b) => a - b)[sig.length >> 1];
@@ -138,28 +151,28 @@ export interface BallisticOptions {
   /** Keeps only guns inside [rmin, rmax] when set. */
   range: [number, number] | null;
   ground?: GroundAt;
-  /** A known fit to start from (the Monte Carlo runs): the search stays within 5 deg of its direction and elevation. */
+  /** A known fit to start from (the Monte Carlo runs). The search stays within 5 deg of its direction and elevation. */
   near?: { th: number; e: number };
-  /** Where the minimap puts the user in each clip, as a shift from the crater. */
+  /** The sighting position from the minimap in each clip, as a shift from the crater. */
   priors?: Record<Id, ShiftPrior>;
 }
 
-// the terrain check: a sample every 10 m, 3 m of slack for the 2 m terrain grid, and 30 m at each end, where the
-// shell is near the ground anyway
+// The terrain check takes a sample every 10 m, allows 3 m of slack for the 2 m terrain grid, and skips 30 m at each
+// end, where the shell is near the ground anyway.
 const CLEAR_STEP = 10, CLEARANCE = 3, CLEAR_END = 30;
 
 /**
  * How close the flight comes to the ground between the gun and the crater. `m` is the least height above the ground,
- * and `deg` the least angle of that gap as seen from the nearer end (gun or crater): about how much lower the shell
- * could fly before it touches the ground there. A shell is always low near both ends, so the angle, not the height,
+ * and `deg` the least angle of that gap as seen from the nearer end (gun or crater). The angle tells about how much
+ * lower the shell could fly before it touches the ground there. A shell is always low near both ends, so the angle, not the height,
  * says whether the terrain makes the shot hard. With `stopBelow` (m), it stops at the first sample lower than that.
  * `end` meters at each end do not count.
  */
 function clearance(c: Candidate, C: Vec3, zGun: number, ground: GroundAt, stopBelow = -Infinity, end = CLEAR_END) {
   const th = c.th * D2R, dx = Math.sin(th), dy = Math.cos(th);
   const gx = C[0] + c.R * dx, gy = C[1] + c.R * dy;
-  // the shell leaves from the ground at this candidate's own gun, not from the gun height of the last solve: a gun
-  // elsewhere may stand higher, and would otherwise start under the ground and 'hit' it at once
+  // The shell leaves from the ground at this candidate's own gun, not from the gun height of the last solve. A gun
+  // elsewhere may stand higher, and would otherwise start under the ground and 'hit' it at once.
   const zLaunch = ground(gx, gy) ?? zGun;
   let m = Infinity, deg = Infinity, atM = 0;
   for (let d = end; d < c.R - end; d += CLEAR_STEP) {
@@ -209,8 +222,8 @@ export function fitBallistic(b: Ballistics, rays: Ray[], o: BallisticOptions): F
     found.best = { ...c, ...e };
   };
 
-  // coarse: every elevation of the table for each direction, then a finer direction step near the best one. Near a
-  // known fit, only its neighborhood.
+  // The coarse search tries every elevation of the table for each direction, then a finer direction step near the best
+  // one. Near a known fit, it tries only its neighborhood.
   const table = o.near ? flights(b, 0.5).filter((f) => Math.abs(f.e - o.near!.e) <= NEAR) : flights(b, 0.5);
   // the least cost of each direction of the coarse search, for the ambiguity report (section 12.3)
   const circular = o.hi - o.lo >= 360 - 1e-9;
@@ -222,7 +235,7 @@ export function fitBallistic(b: Ballistics, rays: Ray[], o: BallisticOptions): F
   const b0: Candidate = found.best;
   for (let th = b0.th - 1.5; th <= b0.th + 1.5; th += 0.1) for (const f of table) tryOne(th, f);
 
-  // fine: alternate between direction and elevation, with fresh flights for the elevations
+  // The fine search alternates between direction and elevation, with fresh flights for the elevations.
   for (const [span, step] of [[0.6, 0.02], [0.05, 0.002]]) {
     for (let round = 0; round < 2; round++) {
       const c: Candidate = found.best!;
@@ -236,21 +249,21 @@ export function fitBallistic(b: Ballistics, rays: Ray[], o: BallisticOptions): F
   return {
     th: r.th, e: r.f.e, R: r.R, T: r.T, rms: r.rms, missM: r.missM, excess: r.excess, shifts: r.shifts, cost: r.cost,
     second: (coarse && secondMinimum(coarse, lo, step, circular)) ?? undefined,
-    // how hard the shot is: without the ends, where the ground under a gun on a slope or next to the crater says
-    // nothing about the flight
+    // How hard the shot is. The check leaves out the ends, where the ground under a gun on a slope or next to the
+    // crater says nothing about the flight.
     clearance: o.ground ? clearance(r, o.C, o.zGun, o.ground, -Infinity, Math.max(100, r.R * 0.1)) : undefined,
   };
 }
 
-/** The least cost that counts as a real misfit for n rays: each off by 0.1 deg. Below it, costs are noise. */
+/** The least cost that counts as a real misfit for n rays, with each ray off by 0.1 deg. Below it, costs are noise. */
 export const costFloor = (n: number) => n * ROBUST * ROBUST * Math.log1p(((0.1 * D2R) / ROBUST) ** 2);
 
 /** Directions closer than this (deg) to the best one belong to its minimum. */
 const SAME_MINIMUM_DEG = 15;
 
 /**
- * The second-best minimum of the coarse cost over direction: the least local minimum at least SAME_MINIMUM_DEG from
- * the best one, with its cost and the cost of the best. Null when there is none.
+ * The second-best minimum of the coarse cost over direction. It is the least local minimum at least SAME_MINIMUM_DEG
+ * from the best one, with its cost and the cost of the best. Null when there is none.
  */
 export function secondMinimum(curve: Float64Array, lo: number, step: number, circular: boolean): { th: number; cost: number; best: number } | null {
   const n = curve.length;

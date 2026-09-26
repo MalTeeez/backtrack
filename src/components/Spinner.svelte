@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * The "snake" spinner of loading.dev (MIT, Jakub Krehel, https://loading.dev/spinners/snake), ported from its React
-   * source: an arc stretching and shrinking as it circles. It takes the text color.
+   * source. It draws an arc that stretches and shrinks as it circles, in the text color.
    */
   let { size = 16 }: { size?: number } = $props();
 </script>

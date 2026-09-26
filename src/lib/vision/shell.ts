@@ -1,9 +1,9 @@
 /**
  * Shell detection (automation plan section 8, Appendix A.3). The frames of the section, warped into the reference
- * camera, give a median background. The shell is a small dark blob in background minus frame; large moving areas
- * (the hands) and the edges of near objects (which move by parallax) count against a candidate. The candidates link
- * frame by frame with a local motion check, not a global path: frame timing errors and a fast shell near the camera
- * would break a global one. The shell leads its smoke trail, and its mark is the dark core of the blob.
+ * camera, give a median background. The shell is a small dark blob in the background minus the frame. Large moving
+ * areas (the hands) and the edges of near objects (which move by parallax) count against a candidate. The candidates
+ * link frame by frame with a local motion check, not a global path, because frame timing errors and a fast shell near
+ * the camera would break a global one. The shell leads its smoke trail, and its mark is the dark core of the blob.
  */
 import { using, type CV } from './cv.ts';
 import { fixedMask } from './hud.ts';
@@ -14,11 +14,11 @@ import { profile, timed } from './profile.ts';
 import { mul, refToFrame, toRef, type Intrinsics, type Mat3 } from './rotation.ts';
 export { refToFrame, toRef };
 
-/** A candidate: frame index, position in the reference camera (px), score. */
+/** A candidate, with its frame index, its position in the reference camera (px), and its score. */
 export interface Candidate { i: number; x: number; y: number; score: number }
 
 export interface Track {
-  /** Per frame of the section (null where the track has no mark): the mark in the reference camera and in the frame. */
+  /** The mark of each frame of the section in the reference camera and in the frame, or null where the track has none. */
   marks: ({ ref: { x: number; y: number }; frame: { x: number; y: number }; score: number; jump: boolean } | null)[];
   candidates: number;
 }
@@ -35,31 +35,31 @@ export const peakOffset = (l: number, m: number, r: number) => {
   return den < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (l - r)) / den)) : 0;
 };
 
-/** A step shorter than this (px) has no direction: the marks are only good to about a pixel. */
+/** A step shorter than this (px) has no direction, because the marks are only good to about a pixel. */
 const SMALL_STEP_PX = 4;
-/** How near (px) to a point of the viewmodel a candidate may not be. */
+/** The least distance (px) of a candidate from a point of the viewmodel. */
 const VIEWMODEL_PX = 12;
 
 export const SHELL = { minScore: 6, perFrame: 40, border: 8, window: 15, firstStep: 400, turnDeg: 30, stepMin: 0.3, stepMax: 4 };
 
 /**
- * The rows a band needs around it: the largest reach of the filters of A.3 (the blur of sigma 25 of the large moving
- * areas: 3 sigma), in whole blocks of 8 rows, so the 1/8 size of that blur lines up with the whole frame.
+ * The rows a band needs around it. This is the largest reach of the filters of A.3 (3 sigma of the blur of sigma 25 of
+ * the large moving areas), in whole blocks of 8 rows, so the 1/8 size of that blur lines up with the whole frame.
  */
 const MARGIN = 96;
 
-/** One band of rows of the reference camera, with the rows of each frame it needs (HUD pixels already 0). */
+/** One band of rows of the reference camera, with the rows of each frame it needs (the HUD pixels already set to 0). */
 export interface BandJob {
   y0: number; y1: number; W: number; H: number; K: Intrinsics;
   frames: ({ rows: Uint8Array; sy0: number; sh: number; R: Mat3 } | null)[];
 }
 
 /**
- * The candidates of every frame, in reference pixels at full size; the dark core of each mark follows in linkTrack.
- * The work goes in bands of rows, each band with a margin that holds the reach of every filter, so the bands give the
- * same candidates as the whole frame: in this thread, or one band per worker of a pool. A search at half size would be
- * 4 times faster, but it lost the small far shell of clip 1 shot 2 and the blurred marks near the impact of shot 1.
- * Frames without a rotation are left out.
+ * Finds the candidates of every frame, in reference pixels at full size. linkTrack finds the dark core of each mark
+ * later. The work goes in bands of rows, in this thread or one band per worker of a pool. Each band has a margin that
+ * holds the reach of every filter, so the bands give the same candidates as the whole frame. A search at half size
+ * would be 4 times faster, but it lost the small far shell of clip 1 shot 2 and the blurred marks near the impact of
+ * shot 1. The search leaves out frames without a rotation.
  */
 export async function shellCandidates(cv: CV, frames: { gray: Gray8; R: Mat3 | null; other?: Float32Array }[], K: Intrinsics, pool?: Pool, useGpu = true): Promise<{ cands: Candidate[]; valid: boolean[] }> {
   let tt = performance.now();
@@ -68,7 +68,7 @@ export async function shellCandidates(cv: CV, frames: { gray: Gray8; R: Mat3 | n
   const hud = staticMask(frames);
   lap('mask');
   let found: Candidate[] | null = null;
-  // the GPU when there is one; else the bands on the pool or here
+  // use the GPU when there is one, else the bands on the pool or here
   const dev = useGpu ? await gpuDevice() : null;
   if (dev) {
     found = await gpuCandidates(dev, frames.map((f) => {
@@ -76,7 +76,7 @@ export async function shellCandidates(cv: CV, frames: { gray: Gray8; R: Mat3 | n
       const d = f.gray.data.slice();
       for (let j = 0; j < d.length; j++) if (hud[j]) d[j] = 0;
       return { data: d, w: W, h: H };
-    }), frames.map((f) => f.R), K, fixedMask(W, H), SHELL).catch((e) => { console.warn('[shell] GPU failed, CPU instead', e); return null; });
+    }), frames.map((f) => f.R), K, fixedMask(W, H), SHELL).catch((e) => { console.warn('[shell] The GPU failed, so the CPU runs instead.', e); return null; });
     lap('gpu');
   }
   if (!found) {
@@ -88,7 +88,7 @@ export async function shellCandidates(cv: CV, frames: { gray: Gray8; R: Mat3 | n
   const cands: Candidate[] = [];
   frames.forEach((f, i) => {
     if (!f.R) return;
-    // not on the viewmodel: the points of the other motions of the stabilization (hands, weapon), in the frame
+    // leave out the viewmodel, which is the points of the other motions of the stabilization (hands, weapon) in the frame
     const other = f.other;
     const onViewmodel = (c: Candidate) => {
       if (!other) return false;
@@ -103,7 +103,7 @@ export async function shellCandidates(cv: CV, frames: { gray: Gray8; R: Mat3 | n
   return { cands, valid: frames.map((f) => !!f.R) };
 }
 
-/** Bands of whole blocks of 8 rows (two per worker, so a slow band does not hold up the rest), with their frame rows. */
+/** Bands of whole blocks of 8 rows (two per worker, so a slow band does not delay the rest), with their frame rows. */
 function bandJobs(frames: { gray: Gray8; R: Mat3 | null }[], K: Intrinsics, hud: Uint8Array | null, n: number): BandJob[] {
   const { w: W, h: H } = frames[0].gray, step = Math.ceil(H / n / 8) * 8, jobs: BandJob[] = [];
   for (let y0 = 0; y0 < H; y0 += step) {
@@ -125,7 +125,7 @@ function bandJobs(frames: { gray: Gray8; R: Mat3 | null }[], K: Intrinsics, hud:
   return jobs;
 }
 
-/** The candidates of one band (all frames): warp, median background, texture, and the score of each frame (A.3). */
+/** Finds the candidates of one band (all frames) with a warp, a median background, a texture and a frame score (A.3). */
 export function bandCandidates(cv: CV, job: BandJob): Candidate[] {
   const { y0, y1, W, H, K } = job, m0 = Math.max(0, y0 - MARGIN), m1 = Math.min(H, y1 + MARGIN), BH = m1 - m0;
   const mask = fixedMask(W, H);
@@ -143,7 +143,7 @@ export function bandCandidates(cv: CV, job: BandJob): Candidate[] {
   const out: Candidate[] = [];
   using((keep) => {
     const bgM = keep(cv.matFromArray(BH, W, cv.CV_8UC1, bg.data));
-    // texture: the gradient of the background, blurred and dilated
+    // the texture is the gradient of the background, blurred and dilated
     const bgF = keep(new cv.Mat()), gx = keep(new cv.Mat()), gy = keep(new cv.Mat()), mag = keep(new cv.Mat()), tex = keep(new cv.Mat());
     bgM.convertTo(bgF, cv.CV_32F);
     cv.Sobel(bgF, gx, cv.CV_32F, 1, 0, 3);
@@ -160,7 +160,7 @@ export function bandCandidates(cv: CV, job: BandJob): Candidate[] {
         const diff = k2(new cv.Mat()), d = k2(new cv.Mat());
         cv.subtract(bgF, wF, diff);
         cv.GaussianBlur(diff, d, new cv.Size(0, 0), 1.5);
-        // large moving areas: |diff| blurred with sigma 25, done at 1/8 size
+        // the large moving areas are |diff| blurred with sigma 25, done at 1/8 size
         const ad = k2(new cv.Mat()), small = k2(new cv.Mat()), big = k2(new cv.Mat());
         cv.absdiff(bgF, wF, ad);
         cv.resize(ad, small, new cv.Size(Math.round(W / 8), Math.round(BH / 8)), 0, 0, cv.INTER_AREA);
@@ -187,8 +187,9 @@ export function bandCandidates(cv: CV, job: BandJob): Candidate[] {
 }
 
 /**
- * The HUD and screen overlays (an FPS counter) of a section: pixels with texture that stay the same in every frame
- * while the camera turns. Null when the camera turns less than about 3 px, as then they do not move in the warp either.
+ * Finds the HUD and screen overlays (an FPS counter) of a section, which are pixels with texture that stay the same in
+ * every frame while the camera turns. Returns null when the camera turns less than about 3 px, as then they do not
+ * move in the warp either.
  */
 function staticMask(frames: { gray: Gray8; R: Mat3 | null }[]): Uint8Array | null {
   const Rs = frames.map((f) => f.R).filter((R): R is Mat3 => !!R);
@@ -226,7 +227,7 @@ function median(imgs: Gray8[]): Gray8 {
     let k = 0;
     for (let i = 0; i < n; i++) { const v = imgs[i].data[j]; if (v) buf[k++] = v; }
     if (!k) continue;
-    // a counting median: at most a few dozen values of 0 to 255
+    // a counting median, for at most a few dozen values of 0 to 255
     if (k <= 12) { const a = buf.subarray(0, k).sort(); out[j] = a[k >> 1]; continue; }
     hist.fill(0);
     for (let i = 0; i < k; i++) hist[buf[i]]++;
@@ -239,8 +240,8 @@ function median(imgs: Gray8[]): Gray8 {
 }
 
 /**
- * Links the candidates frame by frame (A.3): from each of the 10 strongest, walk forward and back. The first step
- * accepts a candidate within 400 px; later steps keep the direction within 30 deg and a length of 0.3 to 4 times the
+ * Links the candidates frame by frame (A.3). From each of the 30 strongest, it walks forward and back. The first step
+ * accepts a candidate within 400 px. Later steps keep the direction within 30 deg and a length of 0.3 to 4 times the
  * last step, scaled by the frame times. The longest chain wins. Then each point moves to the blob that leads along the
  * motion, and the mark is the dark core.
  */
@@ -252,7 +253,7 @@ export function linkTrack(cands: Candidate[], times: number[], valid: boolean[],
     for (;;) {
       const keys = [...pts.keys()];
       const last = step > 0 ? Math.max(...keys) : Math.min(...keys);
-      // up to two frames without a picture (no rotation) are stepped over
+      // the walk steps over up to two frames without a picture (no rotation)
       let i = last + step;
       while (i >= 0 && i < n && !valid[i] && Math.abs(i - last) <= 2) i += step;
       if (i < 0 || i >= n) return;
@@ -267,17 +268,17 @@ export function linkTrack(cands: Candidate[], times: number[], valid: boolean[],
         const expect = (vl * Math.abs(times[i] - times[last])) / Math.abs(times[last] - times[before!]);
         ok = here.filter((c) => {
           const dx = c.x - L.x, dy = c.y - L.y, dl = Math.hypot(dx, dy);
-          // a step of a few pixels has no direction to keep: then only its length counts
+          // a step of a few pixels has no direction to keep, so only its length counts
           // (a far shell that picks up speed takes a step of 9 px after steps of 1 px in clip 1 shot 2)
           if (vl < SMALL_STEP_PX) return dl < Math.max(4 * SMALL_STEP_PX, SHELL.stepMax * expect);
-          // the motion so far points the way the walk goes, forward or back; a short step gets room for the half
-          // pixel its ends can be off
+          // the motion so far points the way the walk goes, forward or back. A short step gets room for the half
+          // pixel its ends can be off.
           const turn = Math.cos(Math.min(Math.PI / 2, (SHELL.turnDeg * Math.PI) / 180 + Math.atan2(0.5, Math.min(dl, vl))));
           return dl > SHELL.stepMin * expect && dl < SHELL.stepMax * expect && dx * vx + dy * vy > turn * dl * vl;
         });
       } else ok = here.filter((c) => Math.hypot(c.x - L.x, c.y - L.y) < SHELL.firstStep);
       if (!ok.length) return;
-      // among the strong ones, the one furthest along the motion: the shell leads its smoke
+      // pick the strong candidate furthest along the motion, because the shell leads its smoke
       const top = Math.max(...ok.map((c) => c.score));
       const strong = ok.filter((c) => c.score > 0.6 * top);
       let pick: Candidate;
@@ -304,7 +305,7 @@ export function linkTrack(cands: Candidate[], times: number[], valid: boolean[],
   const gl = Math.hypot(lastC.x - first.x, lastC.y - first.y) || 1, g = [(lastC.x - first.x) / gl, (lastC.y - first.y) / gl];
   for (const i of ks) {
     const q = best.get(i)!;
-    // the leading blob: near, on the line of motion, at least half as strong, furthest along the whole motion
+    // the leading blob is near, on the line of motion, at least half as strong, and furthest along the whole motion
     const along = (c: Candidate) => (c.x - q.x) * g[0] + (c.y - q.y) * g[1];
     const near = (byFrame.get(i) ?? []).filter((c) => Math.hypot(c.x - q.x, c.y - q.y) < 250 && c.score > 0.5 * q.score && Math.abs((c.x - q.x) * -g[1] + (c.y - q.y) * g[0]) < 12);
     const p = near.reduce((a, b) => (along(b) > along(a) ? b : a), q);
@@ -317,14 +318,14 @@ export function linkTrack(cands: Candidate[], times: number[], valid: boolean[],
 
 /** A step counts as a jump when its speed differs from the trend of its neighbors by this factor (as motion.ts). */
 const JUMP_RATIO = 2.2;
-/** ... and by more than this many pixels, which the marks themselves can be off. */
+/** A jump also differs by more than this many pixels, which is how far the marks themselves can be off. */
 const JUMP_PX = 6;
 
 /**
- * The marks of a track without those past a jump at either end: the speed of a step against the trend of the three
- * steps before it (at the end) or after it (at the start). Past a jump, the frame time is off (the recording skipped
- * or repeated frames, as in clip 1 shot 1) or the linking went on into something else: the mark stays in the track
- * (the impact follows the whole track) but gives no sighting.
+ * The marks of a track without those past a jump at either end. A jump test compares the speed of a step with the trend
+ * of the three steps before it (at the end) or after it (at the start). Past a jump, the frame time is off (the
+ * recording skipped or repeated frames, as in clip 1 shot 1), or the linking went on into something else. The mark
+ * stays in the track (the impact follows the whole track) but gives no sighting.
  */
 export function trimEnds(ks: number[], at: (k: number) => { x: number; y: number }, times: number[]): number[] {
   const speed = (i: number) => { const p = at(ks[i]), q = at(ks[i + 1]); return Math.hypot(q.x - p.x, q.y - p.y) / (times[ks[i + 1]] - times[ks[i]]); };
@@ -340,8 +341,8 @@ export function trimEnds(ks: number[], at: (k: number) => { x: number; y: number
     const v = speed(i), e = trend(i, js), dt = times[ks[i + 1]] - times[ks[i]];
     return (v > JUMP_RATIO * e || v < e / JUMP_RATIO) && Math.abs(v - e) * dt > JUMP_PX;
   };
-  // only the last and the first two steps: a jump inside the track is a frame timing error, which the robust fit of
-  // the solver handles, or a real change of pace
+  // check only the last and the first two steps. A jump inside the track is a frame timing error, which the robust fit
+  // of the solver handles, or a real change of pace.
   let lo = 0, hi = ks.length - 1;
   for (const i of [hi - 2, hi - 1]) if (i >= 3 && jump(i, [i - 3, i - 2, i - 1])) { hi = i; break; }
   for (const i of [1, 0]) if (i + 3 < hi && jump(i, [i + 1, i + 2, i + 3])) { lo = i + 1; break; }
@@ -349,9 +350,9 @@ export function trimEnds(ks: number[], at: (k: number) => { x: number; y: number
 }
 
 /**
- * The dark core of a blob (A.3), at full size: in 13 x 13 reference pixels around it, the background (the median of up
- * to 11 frames, sampled through their rotations) minus this frame, blurred with sigma 0.7, the pixels above 0.7 of the
- * peak, and their weighted centroid.
+ * Finds the dark core of a blob (A.3) at full size. In 13 x 13 reference pixels around it, it takes the background (the
+ * median of up to 11 frames, sampled through their rotations) minus this frame, and blurs it with sigma 0.7. The core
+ * is the weighted centroid of the pixels above 0.7 of the peak.
  */
 function darkCore(frames: { gray: Gray8; R: Mat3 | null }[], K: Intrinsics, i: number, cx: number, cy: number): { x: number; y: number } | null {
   const R = 7, S = 2 * R + 1, cur = frames[i];

@@ -1,5 +1,5 @@
 <script lang="ts">
-  /** The result: the map and a card per shot. `compact` stacks them for the split view next to another phase. */
+  /** The result shows the map and a card per shot. `compact` stacks them for the split view next to another phase. */
   import Spinner from '../Spinner.svelte';
   import ResultMap from '../result/ResultMap.svelte';
   import ShotResult from '../result/ShotResult.svelte';
@@ -79,8 +79,8 @@
       {#if w.field.manual == null && autoValue(w.field) == null && w.field.auto?.value}
         <p class="note warn" data-testid="weapon-unclear">The weapon is unclear ({w.field.auto.reason}). The result uses the {WEAPONS[w.use].name}. Pick the weapon in Coordinates.</p>
       {:else}
-        {@const warn = fieldWarning('weapon', w.field, (x) => WEAPONS[x as Weapon].name)}
-        {#if warn}<p class="note warn">Weapon: {warn}</p>{/if}
+        {@const warn = fieldWarning('weapon', w.field, (x) => WEAPONS[x as Weapon].name, 'The weapon you picked')}
+        {#if warn}<p class="note warn">{warn}</p>{/if}
       {/if}
     {/if}
     {#each result?.shots ?? [] as r (r.shotId)}

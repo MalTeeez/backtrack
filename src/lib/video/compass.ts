@@ -1,19 +1,19 @@
 /**
- * Reads the compass heading of WARDOGS from a video frame: the box at the top middle of the screen with the heading as
- * three digits ("196 S"). The digits are white with a dark outline and sit on anything from bright sky to dark ground,
- * so the reader looks at edges, not brightness: each digit becomes a small grid of edge strengths that it compares
- * with a template per digit. The font is proportional (a 1 is narrower) and the number starts at a fixed left edge,
- * so the reader walks from that edge, with each digit as wide as its own advance, and keeps the best few readings of
- * the digits so far (a beam search). It tries small shifts, because the box moves by a pixel or two with the UI.
- * The templates and advances come from tools/make-compass-templates.ts. Deterministic, without DOM access.
+ * Reads the compass heading of WARDOGS from a video frame. The heading shows as three digits ("196 S") in the box at the
+ * top middle of the screen. The digits are white with a dark outline and sit on anything from bright sky to dark
+ * ground, so the reader looks at edges, not brightness. Each digit becomes a small grid of edge strengths, which the
+ * reader compares with a template per digit. The font is proportional (a 1 is narrower) and the number starts at a
+ * fixed left edge, so the reader walks from that edge, with each digit as wide as its own advance. It keeps the best
+ * few readings of the digits so far (a beam search). It tries small shifts, because the box moves by a pixel or two
+ * with the UI. The templates and advances come from tools/make-compass-templates.ts. Deterministic, without DOM access.
  */
 import { ADVANCE, LABEL_TEMPLATES, TEMPLATES } from './compassTemplates.ts';
 
-/** A grayscale image: one byte per pixel, row by row. */
+/** A grayscale image with one byte per pixel, row by row. */
 export interface Gray { data: ArrayLike<number>; w: number; h: number }
 
-// the layout in the pixels of a 3840 x 2160 frame, relative to the region: the region is 180 x 70 px, its left edge
-// 90 px left of the middle and its top 35 px down; the number starts at x 44 and fills y 22 to 50 of it
+// the layout in the pixels of a 3840 x 2160 frame, relative to the region. The region is 180 x 70 px, with its left
+// edge 90 px left of the middle and its top 35 px down. The number starts at x 44 and fills y 22 to 50 of it.
 const REGION = { dx: -90, y: 35, w: 180, h: 70 };
 export const DIGITS = { x: 44, y: 22, h: 28 };
 // the direction letters (N, NE, ... NW) after the number end at the same place, whatever their width
@@ -36,7 +36,7 @@ export function compassRegion(frameW: number, frameH: number) {
   return { x: Math.round(frameW / 2 + REGION.dx * s), y: Math.round(REGION.y * s), w: Math.round(REGION.w * s), h: Math.round(REGION.h * s), s };
 }
 
-/** Edge strength at each pixel: the sum of the brightness steps to the right and down neighbors. */
+/** The edge strength at each pixel, which is the sum of the brightness steps to the right and down neighbors. */
 export function edges(g: Gray): Float32Array {
   const e = new Float32Array(g.w * g.h);
   for (let y = 0; y < g.h - 1; y++) for (let x = 0; x < g.w - 1; x++) {
@@ -47,7 +47,8 @@ export function edges(g: Gray): Float32Array {
 }
 
 /**
- * The dark ring of the digits: how much darker each pixel is than the brightest pixel near it (within 2 px at 2160p).
+ * The dark ring of the digits, which is how much darker each pixel is than the brightest pixel near it (within 2 px at
+ * 2160p).
  * The outline of a digit is always darker than its white fill next to it, on bright sky and on dark ground alike,
  * while the flat parts of the background and of the fill give almost nothing.
  */
@@ -68,8 +69,8 @@ export function ring(g: Gray, s: number): Float32Array {
 }
 
 /**
- * The white fill of the digits: how much brighter each pixel is than the darkest pixel near it (within 2 px at
- * 2160p). It shows the gaps inside the digits that tell a 6, an 8, a 9 and a 0 apart.
+ * The white fill of the digits, which is how much brighter each pixel is than the darkest pixel near it (within 2 px
+ * at 2160p). It shows the gaps inside the digits that tell a 6, an 8, a 9 and a 0 apart.
  */
 export function fill(g: Gray, s: number): Float32Array {
   const inv = { data: Array.from(g.data, (v) => 255 - v), w: g.w, h: g.h };
@@ -80,9 +81,9 @@ export function fill(g: Gray, s: number): Float32Array {
 export const channels = (g: Gray, s: number) => [edges(g), ring(g, s), fill(g, s)];
 
 /**
- * The features of a digit cell: from x (in 2160p pixels from the left of the region) and `width` wide, the mean of
- * each channel over a grid of GRID cells, each channel scaled to zero mean and unit length (so only the shape counts,
- * not the contrast), side by side and scaled to unit length together.
+ * The features of a digit cell that starts at x (in 2160p pixels from the left of the region) and is `width` wide.
+ * They are the mean of each channel over a grid of GRID cells. Each channel is scaled to zero mean and unit length, so
+ * only the shape counts, not the contrast. The channels sit side by side and are scaled to unit length together.
  */
 export function cellFeatures(chans: Float32Array[], g: Gray, s: number, x: number, dy: number, width: number): Float32Array {
   const n = GRID.cols * GRID.rows, out = new Float32Array(n * chans.length);
@@ -114,12 +115,12 @@ function channelFeatures(e: Float32Array, g: Gray, s: number, x: number, dy: num
 
 const dot = (a: ArrayLike<number>, b: ArrayLike<number>) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; };
 
-/** How far (2160p px) a digit may sit off its place: the spacing between two digits varies a little. */
+/** How far (2160p px) a digit may sit off its place, because the spacing between two digits varies a little. */
 export const NUDGE = 2;
 
 /**
- * How well digit d fits near x: the best correlation of a cell as wide as the digit with its template, within NUDGE
- * of x, and where that is.
+ * How well digit d fits near x. It returns the best correlation of a cell as wide as the digit with its template,
+ * within NUDGE of x, and the position of that cell.
  */
 function fit(e: Float32Array[], g: Gray, s: number, x: number, dy: number, d: number, memo: Map<string, number>) {
   let best = { corr: -2, x };
@@ -176,7 +177,8 @@ export const LABEL_MIN_CORR = 0.5, LABEL_MIN_MARGIN = 0.05;
 
 /**
  * The best reading of the three digits that fits the direction letters (when they are clear), with its lead over the
- * next such reading. The letters rule out a reading one digit off, like 127 for 327: those lie in another sector.
+ * next such reading. The letters rule out a reading one digit off, like 127 for 327, because those lie in another
+ * sector.
  */
 function readChannels(e: Float32Array[], g: Gray, s: number, limits: { corr: number; margin: number }): CompassReading | null {
   if (!TEMPLATES.length) return null;

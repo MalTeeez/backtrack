@@ -1,0 +1,68 @@
+diff --git a/dist/components/design-mode/styles.module.scss b/dist/components/design-mode/styles.module.scss
+index ac71b8f48252a6341f861ce0578e9652583d1e3c..e0cbdb4206c502650bec3ccdf44ca5a889f4bd8a 100644
+--- a/dist/components/design-mode/styles.module.scss
++++ b/dist/components/design-mode/styles.module.scss
+@@ -1432,7 +1432,7 @@ $red: #ef4444;
+   }
+ 
+   &::-webkit-slider-thumb:hover {
+-    background: darken(#f97316, 8%);
++    background: #e05f06; // was darken(#f97316, 8%)
+   }
+ 
+   &::-moz-range-thumb {
+diff --git a/dist/components/page-toolbar-css/Agentation.svelte b/dist/components/page-toolbar-css/Agentation.svelte
+index 0b7070d..3575e4a 100644
+--- a/dist/components/page-toolbar-css/Agentation.svelte
++++ b/dist/components/page-toolbar-css/Agentation.svelte
+@@ -1325,6 +1325,27 @@
+               saveSessionId(pathname, session.id);
+               sessionEstablished = true;
+ 
++              // Patched: the map of moved sections to server annotations lives only in memory, so every reload
++              // posted the moves again. Reuse the open annotation of each moved section and delete its copies. A
++              // section whose annotations are all resolved or dismissed is done, so it leaves the stored state.
++              if (rearrangeState) {
++                const done = new Set<string>();
++                for (const s of rearrangeState.sections) {
++                  const found = session.annotations.filter(
++                    (a) => a.elementPath === "[rearrange]" && a.element === s.selector,
++                  );
++                  const live = found.filter((a) => a.status !== "resolved" && a.status !== "dismissed");
++                  if (live.length) {
++                    rearrangeAnnotationMap.set(s.id, live[0].id);
++                    for (const extra of live.slice(1)) deleteAnnotationFromServer(endpoint, extra.id).catch(() => {});
++                  } else if (found.length) done.add(s.id);
++                }
++                if (done.size) {
++                  const remaining = rearrangeState.sections.filter((s) => !done.has(s.id));
++                  rearrangeState = remaining.length ? { ...rearrangeState, sections: remaining } : null;
++                }
++              }
++
+               const allLocalAnnotations = loadAnnotations<Annotation>(pathname);
+               const serverIds = new Set(session.annotations.map((a) => a.id));
+               const localToMerge = allLocalAnnotations.filter((a) => !serverIds.has(a.id));
+@@ -1470,7 +1491,8 @@
+                   break;
+                 }
+               }
+-            } else if (kind === "rearrange") {
++            } else if (kind === "rearrange" || event.payload.elementPath === "[rearrange]") {
++              // Patched: the server drops the kind field, so elementPath marks a move.
+               for (const [sectionId, annotationId] of rearrangeAnnotationMap) {
+                 if (annotationId === id) {
+                   rearrangeAnnotationMap.delete(sectionId);
+diff --git a/dist/components/page-toolbar-css/settings-panel/SettingsPanel.svelte b/dist/components/page-toolbar-css/settings-panel/SettingsPanel.svelte
+index 6692202c03fce6f7048091a00b42a32f2d63d5d7..cf5e9d86c9459eae1a23c1fabc01ba5b4e58c6dd 100644
+--- a/dist/components/page-toolbar-css/settings-panel/SettingsPanel.svelte
++++ b/dist/components/page-toolbar-css/settings-panel/SettingsPanel.svelte
+@@ -72,7 +72,7 @@
+             />
+           </svg>
+         </a>
+-        <p class={styles.settingsVersion}>v{__VERSION__}</p>
++        <p class={styles.settingsVersion}>v0.1.2</p>
+         <button
+           class={styles.themeToggle}
+           onclick={onToggleTheme}

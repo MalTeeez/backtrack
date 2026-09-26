@@ -41,8 +41,8 @@ function restore(s: string) {
 const sync = () => Object.assign(history, { undo: undos.length, redo: redos.length });
 
 /**
- * Forgets every step, for example after a clip was deleted: an undo past that point would bring back sightings of a
- * video that is gone.
+ * Forgets every step, for example after the user deleted a clip. An undo past that point would bring back sightings of
+ * a video that is gone.
  */
 export function clearHistory() {
   undos.length = 0;

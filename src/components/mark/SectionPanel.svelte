@@ -1,9 +1,12 @@
 <script lang="ts">
   /**
    * The detection of the current shot in this clip (automation plan sections 5 to 10): the button that runs it on the
-   * section of the timeline, and what it found. The camera of the section can be overridden here for every frame at once.
+   * section of the timeline, and what it found. The user can override the camera of the section here for every frame
+   * at once.
    */
-  import { ScanSearch, Trash2, X } from '@lucide/svelte';
+  import Trash2 from '@jis3r/icons/icons/trash-2';
+  import X from '@jis3r/icons/icons/x';
+  import { ScanSearch } from '@lucide/svelte';
   import AutoNum from '../AutoNum.svelte';
   import FieldTag from '../FieldTag.svelte';
   import Key from '../Key.svelte';
@@ -14,8 +17,18 @@
   import { cancelDetect, detect, detection } from '../../lib/state/detect.svelte.ts';
   import { currentShot, project } from '../../lib/state/project.svelte.ts';
   import type { Id } from '../../lib/solver/types.ts';
+  import { frameCache, thumbAt } from '../../lib/video/frameCache.svelte.ts';
 
   let { clipId, loop, ongo }: { clipId: Id; loop: { a: number; b: number } | null; ongo: (t: number) => void } = $props();
+  /** Draws the thumbnail of the frame at t (frameCache.svelte.ts), again as better ones come in. */
+  const thumb = (t: number) => (c: HTMLCanvasElement) => {
+    $effect(() => {
+      void frameCache.version;
+      const b = thumbAt(clipId, t), g = c.getContext('2d')!;
+      g.clearRect(0, 0, c.width, c.height);
+      if (b) g.drawImage(b, 0, 0, c.width, c.height);
+    });
+  };
 
   const shot = $derived(currentShot());
   const sec = $derived(project.clips[clipId]?.sections?.find((s) => s.shotId === shot.id));
@@ -54,7 +67,7 @@
       <button class="btn sm ml-auto" onclick={cancelDetect}><X size={12} /> Stop</button>
     {:else}
       <button class="btn sm primary" onclick={run} disabled={!range} data-testid="detect"
-        title={range ? `Find the shell, the camera, the impact and where you stood in ${s2(range.a)} to ${s2(range.b)}` : 'Drag on the ruler of the timeline over the frames where the shell flies'}>
+        title={range ? `Find the shell, the camera, the impact and the sighting position in ${s2(range.a)} to ${s2(range.b)}` : 'Drag on the ruler of the timeline over the frames where the shell flies'}>
         <ScanSearch size={13} /> Detect in section <Key k="D" />
       </button>
       {#if !range}<span class="text-[11.5px] text-muted">Select where the shell flies on the ruler.</span>{/if}
@@ -65,7 +78,9 @@
 
   {#if sec}
     <dl class="dl text-[12px]">
-      <dt>Section</dt><dd class="num">{s2(sec.a)} to {s2(sec.b)} <span class="text-muted">({(sec.ms / 1000).toFixed(1)} s)</span></dd>
+      <dt>Section</dt><dd class="num">{s2(sec.a)} to {s2(sec.b)}</dd>
+      <!-- how long the detection ran, apart from the section, so it does not read as its length -->
+      <dt>Detection</dt><dd class="num">Took {(sec.ms / 1000).toFixed(1)} s</dd>
       <dt>Shell</dt><dd class="num">{sec.marks.length} marks{sec.dropped.length ? `, ${sec.dropped.length} frames left out` : ''}</dd>
       <dt>Impact</dt>
       <dd class="num flex flex-wrap items-center gap-x-2">
@@ -78,7 +93,7 @@
       {/if}
       {#if walkedM != null}
         <dt>Walked</dt>
-        <dd class="num" title="The minimap of each frame: the rays of the sightings start where you were on their frame, and the position above is the one at the impact.">{walkedM.toFixed(0)} m</dd>
+        <dd class="num" title="The minimap of each frame gives the walk. The ray of each sighting starts at the sighting position of its frame, and the position above is the one at the impact.">{walkedM.toFixed(0)} m</dd>
       {/if}
     </dl>
     <div class="grid grid-cols-3 gap-1.5" title="The camera of the reference frame of the section ({sec.ref.toFixed(3)} s). A value typed here goes to every frame of the section.">
@@ -90,8 +105,19 @@
     {#if sec.dropped.length}
       <details class="disclosure text-[12px]">
         <summary>Frames left out</summary>
-        <ul class="m-0 list-none p-0">
-          {#each sec.dropped as d}<li><button class="num hover:text-accent" onclick={() => ongo(d.t)}>{d.t.toFixed(3)} s</button> <span class="text-muted">{d.reason}</span></li>{/each}
+        <!-- each frame with its picture, which opens it -->
+        <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
+          {#each sec.dropped as d (d.t)}
+            <li class="flex items-center gap-2">
+              <button class="shrink-0 border border-line hover:border-accent" onclick={() => ongo(d.t)} title="Show this frame" aria-label="Show the frame at {d.t.toFixed(3)} s">
+                <canvas class="block h-[45px] w-20 bg-stage" width="160" height="90" {@attach thumb(d.t)}></canvas>
+              </button>
+              <span class="flex min-w-0 flex-col">
+                <button class="num self-start hover:text-accent" onclick={() => ongo(d.t)}>{d.t.toFixed(3)} s</button>
+                <span class="text-muted">{d.reason}</span>
+              </span>
+            </li>
+          {/each}
         </ul>
       </details>
     {/if}

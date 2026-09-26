@@ -1,6 +1,6 @@
 /**
- * Clip files: a clip downloads as its video file plus an annotation file (`<video name>.backtrack.json`) when it has
- * marks, and the same pair imports back (annotation.ts).
+ * A clip downloads as its video file and an annotation file (`<video name>.backtrack.json`) when it has marks, and the
+ * same pair imports back (annotation.ts).
  */
 import { clipBlob } from '../state/persistence.ts';
 import type { ClipMeta, ProjectData } from '../solver/types.ts';

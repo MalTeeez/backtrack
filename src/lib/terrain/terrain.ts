@@ -1,6 +1,6 @@
 /**
- * Terrain heights from the wardogs-calculator Terrain3D data (docs/terrain-plan.md): a manifest and chunks of
- * little-endian 16-bit samples. A chunk sample decodes to meters as
+ * Terrain heights from the wardogs-calculator Terrain3D data (docs/terrain-plan.md). The data is a manifest and chunks
+ * of little-endian 16-bit samples. A chunk sample decodes to meters as
  * worldZOffsetMeters + (minLocalZ + raw / 65535 * (maxLocalZ - minLocalZ)) * worldZScaleMetersPerLocalUnit.
  * The heights share one unknown datum, so only their differences mean something.
  */

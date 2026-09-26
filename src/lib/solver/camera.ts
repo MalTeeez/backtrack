@@ -7,7 +7,7 @@ export const wrap360 = (a: number) => { a %= 360; return a < 0 ? a + 360 : a; };
 /** The signed difference a - b (deg) in [-180, 180), for any a and b. */
 export const angleDiff = (a: number, b: number) => wrap360(a - b + 180) - 180;
 
-/** Focal length in pixels, f = (W/2) / tan(FOV/2). A vertical FOV uses H instead of W. */
+/** The focal length in pixels, f = (W/2) / tan(FOV/2). A vertical FOV uses H instead of W. */
 export function focalPx(w: number, h: number, fovDeg: number, axis: 'h' | 'v'): number {
   const half = (axis === 'v' ? h : w) / 2;
   return half / Math.tan((fovDeg * D2R) / 2);
@@ -16,7 +16,7 @@ export function focalPx(w: number, h: number, fovDeg: number, axis: 'h' | 'v'): 
 /** Converts a video pixel to camera coordinates, with the origin at the center and y up. */
 export const centered = (p: Pt, w: number, h: number): Pt => ({ x: p.x - w / 2, y: h / 2 - p.y });
 
-/** Camera pitch (deg) from a vertical world edge through a and b, in centered coordinates. Returns null for a degenerate edge. */
+/** The camera pitch (deg) from a vertical world edge through a and b, in centered coordinates. Returns null for a degenerate edge. */
 export function pitchFromEdge(a: Pt, b: Pt, f: number): number | null {
   const dx = b.x - a.x, dy = b.y - a.y;
   const den = a.y * dx - a.x * dy;
@@ -24,14 +24,14 @@ export function pitchFromEdge(a: Pt, b: Pt, f: number): number | null {
   return Math.atan((f * dx) / den) * R2D;
 }
 
-/** Approximate 1-sigma pitch error (deg) of an edge, (f / |x_mid|) * (1.41 * sigmaPx / length). */
+/** The approximate 1-sigma pitch error (deg) of an edge, (f / |x_mid|) * (1.41 * sigmaPx / length). */
 export function edgePitchSigma(a: Pt, b: Pt, f: number, sigmaPx: number): number {
   const len = Math.hypot(b.x - a.x, b.y - a.y);
   const xMid = Math.max(Math.abs((a.x + b.x) / 2), 1);
   return (f / xMid) * ((1.41 * sigmaPx) / Math.max(len, 1)) * R2D;
 }
 
-/** Extra error (deg) an edge may have beyond its marks: few building corners are exactly vertical. */
+/** The extra error (deg) an edge may have beyond its marks, because few building corners are exactly vertical. */
 const EDGE_FLOOR_DEG = 0.3;
 /** How many standard deviations an edge may be off the others before it counts as wrong. */
 const EDGE_SIGMAS = 3;
@@ -82,7 +82,7 @@ export function cameraAxes(headingDeg: number, pitchDeg: number, rollDeg = 0): {
   return { R, U, F };
 }
 
-/** World ray through camera point c, for a camera at a heading, pitch and roll in degrees. */
+/** The world ray through camera point c, for a camera at a heading, pitch and roll in degrees. */
 export function rayWorld(c: Pt, f: number, headingDeg: number, pitchDeg: number, rollDeg = 0): Vec3 {
   const { R, U, F } = cameraAxes(headingDeg, pitchDeg, rollDeg);
   const d: Vec3 = [0, 0, 0];
@@ -91,7 +91,7 @@ export function rayWorld(c: Pt, f: number, headingDeg: number, pitchDeg: number,
   return [d[0] / n, d[1] / n, d[2] / n];
 }
 
-/** Azimuth (deg, clockwise from north) and elevation (deg) of a unit vector. */
+/** The azimuth (deg, clockwise from north) and elevation (deg) of a unit vector. */
 export function azEl(d: Vec3): { az: number; el: number } {
   return { az: wrap360(Math.atan2(d[0], d[1]) * R2D), el: Math.asin(Math.max(-1, Math.min(1, d[2]))) * R2D };
 }
@@ -112,7 +112,7 @@ export function project(P: Vec3, O: Vec3, w: number, h: number, f: number, headi
   return { x: w / 2 + (f * dot(R)) / z, y: h / 2 - (f * dot(U)) / z };
 }
 
-/** y = a + b x + c x^2 by least squares: [a, b, c], or null. */
+/** Fits y = a + b x + c x^2 by least squares. Returns [a, b, c], or null. */
 export function quadratic(xs: number[], ys: number[]): number[] | null {
   const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], y = [0, 0, 0];
   xs.forEach((x, i) => { const r = [1, x, x * x]; for (let a = 0; a < 3; a++) { y[a] += r[a] * ys[i]; for (let b = 0; b < 3; b++) A[a][b] += r[a] * r[b]; } });

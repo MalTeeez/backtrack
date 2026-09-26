@@ -12,8 +12,8 @@ import { refToFrame } from '../../lib/vision/rotation.ts';
 export const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /**
- * A compass rose of radius r around a map point, north up: a tick every 10 deg, a number every 30 deg, and the
- * suspected heading with its tolerance as an arc when there is one.
+ * Draws a compass rose of radius r around a map point, with north up. It has a tick every 10 deg, a number every
+ * 30 deg, and an arc for the suspected heading and its tolerance when there is one.
  */
 export function compassRose(g: CanvasRenderingContext2D, x: number, y: number, r: number, suspect?: { deg: number; tol: number }) {
   const dir = (a: number): [number, number] => [Math.sin((a * Math.PI) / 180), -Math.cos((a * Math.PI) / 180)];
@@ -113,18 +113,18 @@ export function drawMarks(g: CanvasRenderingContext2D, s: Sighting | undefined, 
  */
 export interface Note {
   kind: 'edge' | 'shell'; target: MarkTarget; at: Pt; title: string; short: string; lines: string[]; warn: string[];
-  /** A label of another shot: shown, but without a remove button. */
+  /** A label of another shot. It shows without a remove button. */
   fixed?: boolean;
-  /** Where a copied mark comes from: a short line for the collapsed label, a long one for the open label. */
+  /** Where a copied mark comes from, as a short line for the collapsed label and a long one for the open label. */
   from?: { short: string; long: string };
-  /** Its mark is out of view (the video is zoomed): no label, and an empty box. */
+  /** Its mark is out of view because the video is zoomed. It gets no label and an empty box. */
   hidden?: boolean;
 }
 
 /** The mark a label belongs to, for its remove button: the shell, edge i, or the edge in progress. */
 export type MarkTarget = { kind: 'shell' } | { kind: 'edge'; i: number } | { kind: 'pending' };
 
-/** Solver errors about what the Coordinates phase asks for: the crater. */
+/** Whether a solver error is about the crater, which the Coordinates phase asks for. */
 export const forLater = (error: string) => error.includes('has no X');
 
 const fmtPt = (p: Pt) => `${p.x.toFixed(1)}, ${p.y.toFixed(1)}`;
@@ -150,7 +150,7 @@ export function markNotes(
   edges.forEach((e, i) => {
     const warn: string[] = !value(s?.shell) && i === 0 ? [...noCamera] : [];
     if (e.pitch == null) warn.push('Gives no pitch. Mark it again.');
-    else if (e.offBy != null) warn.push(`${Math.abs(e.offBy).toFixed(1)} deg off the other edges, left out. Is it vertical?`);
+    else if (e.offBy != null) warn.push(`${Math.abs(e.offBy).toFixed(1)} deg off the other edges, so the solver leaves it out. Is it vertical?`);
     out.push({
       kind: 'edge',
       target: { kind: 'edge', i },
@@ -181,14 +181,14 @@ export function markNotes(
       // the crater comes in Coordinates, so its absence is no problem while marking
       warn: [
         ...(noCamera.length ? noCamera : r && !r.ok && !forLater(r.error) ? [r.error] : []),
-        ...(state === 'warned' ? ['Differs from the automatic mark.'] : []),
+        ...(state === 'warned' ? ['It differs from the automatic mark.'] : []),
       ],
     });
   }
   return out;
 }
 
-/** Label backgrounds: dark tints of the mark colors, so the white and orange text stays readable. */
+/** The label backgrounds are dark tints of the mark colors, so the white and orange text stays readable. */
 const NOTE_BG = { edge: 'rgba(20, 46, 72, 0.9)', shell: 'rgba(72, 46, 12, 0.9)' };
 const WARN = '#ffc56b';
 
@@ -211,9 +211,9 @@ export function drawNotes(g: CanvasRenderingContext2D, notes: Note[], k: number,
   const close = lh; // the remove button of the hovered label, in its top right corner
   const W = g.canvas.width, H = g.canvas.height;
 
-  // each label goes to the first spot next to its mark that no label placed before covers (with its collapsed size,
-  // so opening it on hover does not move it): to the right, below and above, then to the left, then further down on
-  // either side. Without a free spot, it takes the one that overlaps least.
+  // Each label goes to the first spot next to its mark that no earlier label covers. The test uses the collapsed size,
+  // so opening a label on hover does not move it. The spots in order are to the right, below and above, then to the
+  // left, then further down on either side. Without a free spot, a label takes the one that overlaps least.
   const placed: { x: number; y: number; w: number; h: number }[] = [];
   const overlap = (a: { x: number; y: number; w: number; h: number }) => placed.reduce((sum, b) =>
     sum + Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) + pad) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) + pad), 0);
@@ -280,20 +280,20 @@ export interface DetectionView {
   status: { text: string; ok: boolean };
   /** The horizon of the frame camera, a point per whole degree of heading. */
   horizon: { p: Pt; deg: number }[];
-  /** The shell track of the section and the impact, turned into this frame; the mark of this frame. */
+  /** The shell track of the section and the impact, turned into this frame, and the mark of this frame. */
   track: Pt[]; here: Pt | null; impact: Pt | null;
-  /** The HUD parts the detection reads, with what it found there. */
-  boxes: { x: number; y: number; w: number; h: number; label: string }[];
+  /** The HUD parts the detection reads, with what it found there. The compass comes first. */
+  boxes: { x: number; y: number; w: number; h: number; label: string; icon: 'compass' | 'map' }[];
 }
 
 export function detectionView(sec: Section, t: number, w: number, h: number, st: Pick<Settings, 'fovDeg' | 'fovAxis'>): DetectionView {
   const f = sec.frames.find((x) => sameFrame(x.t, t)), R = f?.ok ? f.R : null;
   const K = { f: focalPx(w, h, st.fovDeg, st.fovAxis), cx: w / 2 - 0.5, cy: h / 2 - 0.5 };
-  // the vision code puts pixel centers on whole numbers, the app at .5
+  // The vision code puts pixel centers on whole numbers, and the app puts them at .5.
   const toFrame = (x: number, y: number) => { const p = R && refToFrame(K, R, { x, y }); return p ? { x: p.x + 0.5, y: p.y + 0.5 } : null; };
   const mark = sec.marks.find((m) => sameFrame(m.t, t)), drop = sec.dropped.find((d) => sameFrame(d.t, t));
   const text = !f ? 'Outside the detection'
-    : `${R ? `Rotation: ${f.inliers} matches, fit ${f.fitPx.toFixed(2)} px` : `No sure rotation (${f.inliers} matches)`}${mark ? `, shell score ${mark.score.toFixed(0)}` : drop ? `, ${drop.reason}` : ''}`;
+    : `${R ? `Rotation from ${f.inliers} matches, fit ${f.fitPx.toFixed(2)} px` : `No sure rotation (${f.inliers} matches)`}${mark ? `, shell score ${mark.score.toFixed(0)}` : drop ? `, ${drop.reason}` : ''}`;
   const cam = frameCameraAt(sec, t), horizon: DetectionView['horizon'] = [];
   if (cam) {
     const [ch, cp, cr] = [cam.h.value!, cam.p.value!, cam.r.value!];
@@ -310,15 +310,52 @@ export function detectionView(sec: Section, t: number, w: number, h: number, st:
     here: mark ? { x: mark.x, y: mark.y } : null,
     impact: sec.impact.at ? toFrame(sec.impact.at.x, sec.impact.at.y) : null,
     boxes: [
-      { ...c, label: cam ? `Compass: the camera looks at ${cam.h.value!.toFixed(1)} deg` : 'Compass' },
-      { ...m, label: at ? `Minimap: X ${at.x.toFixed(2)} Y ${at.y.toFixed(2)}` : 'Minimap: no match' },
+      { ...c, label: cam ? `Compass heading of the camera ${cam.h.value!.toFixed(1)} deg` : 'Compass', icon: 'compass' },
+      { ...m, label: at ? `Minimap at X ${at.x.toFixed(2)} Y ${at.y.toFixed(2)}` : 'Minimap without a match', icon: 'map' },
     ],
   };
 }
 
+// The icons of the labels of the detection, as the paths of their Lucide icons (24 x 24).
+const ICON_PATHS: Record<'compass' | 'map' | 'ok' | 'warn', string[]> = {
+  compass: ['M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0z', 'M16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88z'],
+  map: ['M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z', 'M15 5.764v15', 'M9 3.236v15'],
+  ok: ['M20 6 9 17l-5-5'],
+  warn: ['m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3', 'M12 9v4', 'M12 17h.01'],
+};
+const ICONS2D = Object.fromEntries(Object.entries(ICON_PATHS).map(([k, ps]) => [k, ps.map((d) => new Path2D(d))])) as Record<keyof typeof ICON_PATHS, Path2D[]>;
+/** The dark ground of the labels of the detection, as the labels of the marks have (NOTE_BG). */
+const LABEL_BG = 'rgba(14, 18, 24, 0.88)';
+
 /**
- * Draws a detection view over a video of w x h pixels: T maps video pixels to the canvas, k is the device pixel ratio.
- * Everything stays inside the video.
+ * Draws a label as the labels of the marks look: a dark box with an icon and the text, and a stripe of its color on the
+ * left. (x, y) is its top left corner, and it stays inside the canvas. It returns its height.
+ */
+function drawLabel(g: CanvasRenderingContext2D, x: number, y: number, text: string, icon: keyof typeof ICON_PATHS, color: string, k: number) {
+  const pad = 4 * k, size = 12 * k, h = 18 * k, w = pad + size + pad + g.measureText(text).width + pad + 2 * k;
+  x = Math.max(0, Math.min(g.canvas.width - w, x));
+  y = Math.max(0, Math.min(g.canvas.height - h, y));
+  g.fillStyle = LABEL_BG; g.fillRect(x, y, w, h);
+  g.fillStyle = color; g.fillRect(x, y, 2 * k, h);
+  g.save();
+  g.translate(x + 2 * k + pad, y + (h - size) / 2);
+  g.scale(size / 24, size / 24);
+  g.strokeStyle = color; g.lineWidth = 2; g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const p of ICONS2D[icon]) g.stroke(p);
+  g.restore();
+  g.fillStyle = '#ffffff'; g.textBaseline = 'middle';
+  g.fillText(text, x + 2 * k + pad + size + pad, y + h / 2);
+  g.textBaseline = 'alphabetic';
+  return h;
+}
+
+/**
+ * Draws a detection view over a video of w x h pixels. T maps video pixels to the canvas, and k is the device pixel
+ * ratio. Everything stays inside the video.
+ * - The horizon of the camera is a line in the scene. Its headings form a scale just under the compass of the game,
+ *   so they compare with it.
+ * - Each HUD part the detection reads gets a dashed box and a label, and the status of the frame a label in the top
+ *   left corner. The labels look like the labels of the marks, with an icon each.
  */
 export function drawDetection(g: CanvasRenderingContext2D, v: DetectionView, T: (p: Pt) => Pt, k: number, w: number, h: number) {
   const v0 = T({ x: 0, y: 0 }), v1 = T({ x: w, y: h });
@@ -330,16 +367,22 @@ export function drawDetection(g: CanvasRenderingContext2D, v: DetectionView, T: 
   };
   g.font = `${11 * k}px 'Commit Mono', ui-monospace, monospace`;
   g.lineCap = 'round'; g.lineJoin = 'round';
-  // the horizon with the heading: a tick per degree, a longer one and the number every 5
   if (v.horizon.length > 1) {
     cased(() => { g.beginPath(); v.horizon.forEach(({ p }, i) => { const q = T(p); if (i) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); }); }, 'rgba(255,255,255,0.7)', 1 * k);
-    g.fillStyle = '#ffffff'; g.textAlign = 'center';
-    for (const { p, deg } of v.horizon) {
-      const q = T(p), len = (deg % 5 ? 4 : 9) * k;
-      cased(() => { g.beginPath(); g.moveTo(q.x, q.y); g.lineTo(q.x, q.y - len); }, 'rgba(255,255,255,0.8)', 1 * k);
-      if (deg % 5 === 0) { g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 3 * k; g.strokeText(String(deg), q.x, q.y - 12 * k); g.fillText(String(deg), q.x, q.y - 12 * k); }
+    // The heading scale lies just under the compass strip of the game (1800 x 125 px at 2160p, in the middle of the top
+    // edge), with a tick per degree where that heading is on screen and a number every 5 degrees.
+    {
+      const s = h / 2160, a = T({ x: w / 2 - 900 * s, y: 0 }), z = T({ x: w / 2 + 900 * s, y: 125 * s }), top = z.y + 3 * k, bandH = 24 * k;
+      g.fillStyle = LABEL_BG; g.fillRect(a.x, top, z.x - a.x, bandH);
+      g.fillStyle = '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'bottom';
+      for (const { p, deg } of v.horizon) {
+        const x = T(p).x;
+        if (x < a.x || x > z.x) continue;
+        g.fillRect(x - 0.5 * k, top, 1 * k, (deg % 5 ? 4 : 8) * k);
+        if (deg % 5 === 0) g.fillText(String(deg), x, top + bandH - 2 * k);
+      }
+      g.textAlign = 'start'; g.textBaseline = 'alphabetic';
     }
-    g.textAlign = 'start';
   }
   // the track of the shell in this frame
   if (v.track.length > 1) {
@@ -349,19 +392,18 @@ export function drawDetection(g: CanvasRenderingContext2D, v: DetectionView, T: 
   }
   if (v.here) { const q = T(v.here); cased(() => { g.beginPath(); g.arc(q.x, q.y, 7 * k, 0, 7); }, '#ffffff', 1.5 * k); }
   if (v.impact) { const q = T(v.impact); cased(() => { g.beginPath(); g.arc(q.x, q.y, 12 * k, 0, 7); }, '#e5484d', 2 * k); }
-  // the HUD parts: a dashed box with its label above
+  // each HUD part: a dashed box, and its label above it, or below it where the top has no room (the compass, whose
+  // label goes under the heading scale)
   for (const b of v.boxes) {
     const a = T(b), z = T({ x: b.x + b.w, y: b.y + b.h });
     g.setLineDash([5 * k, 4 * k]);
     cased(() => { g.beginPath(); g.rect(a.x, a.y, z.x - a.x, z.y - a.y); }, 'rgba(232,153,58,0.9)', 1.25 * k);
     g.setLineDash([]);
-    const y = a.y > 20 * k ? a.y - 5 * k : z.y + 14 * k;
-    g.strokeStyle = 'rgba(0,0,0,0.75)'; g.lineWidth = 3 * k; g.strokeText(b.label, a.x, y);
-    g.fillStyle = '#ffffff'; g.fillText(b.label, a.x, y);
+    // the label of the compass goes under the heading scale, which lies under the compass strip
+    const below = b.icon === 'compass' && v.horizon.length > 1 ? T({ x: 0, y: (125 * h) / 2160 }).y + 31 * k : z.y + 4 * k;
+    drawLabel(g, a.x, a.y > 26 * k ? a.y - 22 * k : below, b.label, b.icon, '#e8993a', k);
   }
   // the status of the frame, in the top left corner of the video on screen
-  const pad = 6 * k, tw = g.measureText(v.status.text).width, x = Math.max(0, v0.x) + pad, y = Math.max(0, v0.y) + pad;
-  g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(x, y, tw + 2 * pad, 18 * k);
-  g.fillStyle = v.status.ok ? '#ffffff' : '#e8993a'; g.fillText(v.status.text, x + pad, y + 13 * k);
+  drawLabel(g, Math.max(0, v0.x) + 6 * k, Math.max(0, v0.y) + 6 * k, v.status.text, v.status.ok ? 'ok' : 'warn', v.status.ok ? '#5fd4c4' : '#e8993a', k);
   g.restore();
 }

@@ -1,10 +1,11 @@
 /**
- * One small picture per clip for the clip list: the frame in the middle of the clip, where the shell usually is. The
- * pictures come one after the other, so a long list does not open many videos at once, and they stay for the session.
+ * One small picture per clip for the clip list, which shows the frame in the middle of the clip, where the shell
+ * usually is. The pictures come one after the other, so a long list does not open many videos at once, and they stay
+ * for the session.
  */
 import { clipUrl } from '../state/persistence.ts';
 import type { Id } from '../solver/types.ts';
-import { makeThumbnails } from './thumbnails.ts';
+import { makeThumbnails } from './frameCache.svelte.ts';
 
 export const clipThumbs: Record<Id, string> = $state({});
 const asked = new Set<Id>();

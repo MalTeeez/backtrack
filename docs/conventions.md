@@ -120,7 +120,7 @@ The look follows the model pages of https://pi.dev, not terra-lab. `src/app.css`
 
 ## Writing style
 
-All English text follows `../../rust/horizonslauncher/plan/docs/writing-style.md`. The text is ASCII only, so units
+All English text follows `docs/writing-style.md`, a copy of the horizonslauncher rules. The text is ASCII only, so units
 read `deg` and `+/-` instead of the symbols. `plan.md` and `poc/` keep their original text.
 
 ## Open questions from plan section 11
@@ -253,10 +253,19 @@ and roll), from vertical edges (pitch) and the compass heading, or from values t
   Each miss counts in units of the error of its ray (automation plan section 12.5), against the median ray, split
   into the part across the path of the shell (the mark and the camera) and the part along it (also the frame time
   error times the speed of the shell in the image): a frame time moves a mark only along the path. The frame time
-  error of each clip comes from its marks (`frameTiming` in `result.ts`): the jitter of each mark along the path
-  against a quadratic through its 6 neighbors, over the speed, for marks faster than 3 deg/s, as a robust sigma
-  (3 to 80 ms; 15 ms, `TIMESTAMP_SIGMA_S`, when a clip has too few). On synthetic runs it reads 13 to 20 ms for a
-  true 10 ms and 25 to 62 ms for 30 ms, which is close enough for a weight.
+  error of each clip comes from its marks (`frameTiming` in `result.ts`): each mark direction against a quadratic in
+  time through its 6 neighbors, split along the path and across it. A frame time moves a mark only along the path,
+  so the robust sigma across (the mark error) comes off the one along, and each miss is scaled for the error of the
+  fit itself (about 1.5 times the variance of one mark). Only marks faster than 3 deg/s count; 3 to 80 ms, or 15 ms
+  (`TIMESTAMP_SIGMA_S`) when a clip has too few. On synthetic runs a true 10 ms reads 11 to 12 ms and 30 ms 28 to
+  32 ms (the median of 30 runs). The turns of the camera cannot give it: on even turns of the capture test the same
+  split reads 2 to 11 ms, but on the free turns of the test clips (12 fps) the hand speeds up and slows down along the
+  turn by 45 to 173 ms. With 5 to 7 sightings the 15 ms default is as good as the older 5 ms without the split
+  (L52, 30 ms, 100 runs: 22 / 55 m against 25 / 61 m); 5 ms with the split trusts the path too much (31 / 66 m).
+  The sightings of a jump that `motionFlags` finds (skipped or repeated frames) count only across the path (a frame
+  time error of 0.25 s): with 15 to 30 percent of such frames, as good as leaving them out and better than keeping
+  them (15 sightings, L52: 6 / 15 m and 9 / 26 m against 8 / 18 m and 11 / 30 m), and a good frame taken for a jump
+  still helps. On clip 1 shot 1 it moved the gun 21 m toward the gun of shot 2.
 - **Fit error.** The result shows the RMS miss of the rays in meters and in degrees. The "fit error is high" note only
   counts the angle beyond what a 10 m miss explains (`MODEL_M` in `ballisticFit.ts`): the shell is only 30 to 200 m
   away in the last frames, so a few meters of position or model error are several degrees there. On the test clip
@@ -270,7 +279,11 @@ and roll), from vertical edges (pitch) and the compass heading, or from values t
   ground where the user stood: at the minimap position, or at the solved spot, refined over the rounds like the gun
   (`terrainHeights`). A user on a 15 m roof taken at the height of the crater put the gun 20 m off on synthetic data.
   Without a minimap position a small roof is not found: at the crater height the solve puts the user 40 m off it.
-  The eye height is not solved: the rays hardly tell it apart from the flight.
+  On a walk, each sighting takes the ground of its own spot (`Heights.walk`). What the terrain data does not have (a
+  wall, a vehicle, built blocks: in clip 1 the user stood on two hesco walls) the user enters in Coordinates: how
+  high they stood above the ground (`Shot.raisedM`, per clip) and how high the crater lies (`craterRaisedM`). The
+  solver cannot find it: solved with a prior, the height of a user 5 m up came out at 0.5 m on synthetic data. For
+  the L52, 2.2 m left out moves the gun about 4 m, and 5 m about 9 m.
 - **Time.** Recordings have no fixed frame rate. On import, `prepareClip` (`src/lib/video/prepareClip.ts`, with
   mediabunny) lists the presentation time of every frame, and remuxes WebM files so they carry a seek index and a
   duration. Without the index, Firefox reports a wrong duration and stalls about 2 s before playing after a seek.
@@ -342,13 +355,15 @@ pitch lines also show dashed in the video.
   searched first. Clip 2 Bakurani 79.86, 72.99 (0.78 m/px); clip 1 Ozeti 97.48, 65.69 and 97.28, 65.60. When a clip
   without a map opens, the worker looks at half a second from its middle and the question for the map shows the
   result first; the question stays until the user answers.
-- **Walking** (`walkPath` in `pipeline.ts`). After the minimap search, up to 16 frames from the section to the impact
-  each match their own minimap at the found scale near the found spot (zoom 6, with a subpixel peak), matches that
-  stand out less than 2 times are dropped, and a quadratic in time per axis (`smoothPath`, twice, without matches
-  3 robust sigmas off) gives the path. A user who moved less than 3 m stood still; otherwise the section keeps the
-  path (`walk`), the position becomes the one at the impact, and each sighting gets its offset (`walkM`). The three
-  test sections read within 0.3 m of standing; in clip 2 the minimap of one frame does not stand out (1.1 times), so
-  it counts as standing. The stabilization models a pure rotation: a walk moves near features (parallax), and 4 m
+- **Walking** (`walkPath` in `pipeline.ts`). After the minimap search, up to 16 points from the section to the impact
+  each match their own minimap (the median of the frames within 0.3 s, `WALK_SPAN_S`) at the found scale near the
+  found spot (zoom 6, with a subpixel peak), on the worker pool. Matches that stand out less than 2 times are
+  dropped, and a quadratic in time per axis (`smoothPath`, twice, without matches 3 robust sigmas off) gives the path.
+  A user who moved less than 3 m stood still; otherwise the section keeps the path (`walk`), the position becomes the
+  one at the impact, and each sighting gets its offset (`walkM`). The three test sections read within 0.3 m of
+  standing, with each match standing out 5 to 7 times (single frames too; the median over 0.3 s lifts the worst one
+  from 5.1 to 5.9 on clip 2 and costs about 130 ms). The Monte Carlo runs add a speed error of 0.15 m/s and a
+  position error of 0.3 m to a walk. The stabilization models a pure rotation: a walk moves near features (parallax), and 4 m
   moves a feature 500 m away by 0.5 deg against the reference. The model of the highest features and the chains of
   neighbor frames (a few centimeters apart) should carry a slow walk, but no walking clip has checked this or the path.
 - **Pictures.** The video in Mark has a Detection overlay (`detectionView` and `drawDetection` in `draw.ts`): the
@@ -365,7 +380,10 @@ pitch lines also show dashed in the video.
   and the shell in bands of rows when there is no GPU. With WebGPU the shell runs in compute shaders that follow
   OpenCV (kernel sizes, borders, block means, upsampling); the GPU and the CPU give the same marks on all three test
   shots, in Chrome and in Firefox. `profile.ts` times every part. A section of about 50 4K frames: 36.6 s on one
-  thread at first, 8.3 s now with the GPU (11 s on the CPU pool), of which about 3 s find the map when none is known.
+  thread at first, 4.7 s now with the GPU and a started pool. Starting the pool (every worker loads OpenCV) takes
+  about 3.4 s, so the worker starts when a clip opens in Mark (`warmDetection`), not on the first Detect. More than 8
+  workers made the start slower on a 32-core machine, and running the compass and the minimap during the
+  stabilization made a section slower (5.4 s): their jobs wait in the queue before the chains.
   OpenCV is one file of the build that each worker fetches; the page never loads it.
 - **FOV.** The FOV of the game is a setting of the user, not of a project (`src/lib/state/prefs.svelte.ts`, kept in
   localStorage): the Settings dialog (the FOV button in the header, a modal `<dialog>`) sets it once for every

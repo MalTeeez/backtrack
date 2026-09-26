@@ -1,7 +1,7 @@
 <script module lang="ts">
   import { ui } from '../../lib/state/project.svelte.ts';
   // folded sightings live in the UI state, so they stay folded across phase changes and reloads
-  /** Whether every one of these sightings is folded, and folding or opening them all. */
+  /** Whether every one of these sightings is folded. `foldAll` folds or opens them all. */
   export const allFolded = (ids: string[]) => ids.length > 0 && ids.every((id) => ui.folded[id]);
   export function foldAll(ids: string[], fold: boolean) {
     for (const id of ids) ui.folded[id] = fold;
@@ -9,8 +9,11 @@
 </script>
 
 <script lang="ts">
+  import { fold } from '../../lib/motion.ts';
   /** The sightings of the current shot: their values as fields, and notes only for what is missing or wrong. */
-  import { ChevronDown, ChevronRight, Trash2 } from '@lucide/svelte';
+  import ChevronDown from '@jis3r/icons/icons/chevron-down';
+  import ChevronRight from '@jis3r/icons/icons/chevron-right';
+  import Trash2 from '@jis3r/icons/icons/trash-2';
   import NumInput from '../NumInput.svelte';
   import AutoNum from '../AutoNum.svelte';
   import FieldTag from '../FieldTag.svelte';
@@ -49,7 +52,7 @@
 
 <div class="flex flex-col gap-1.5" data-testid="sighting-list">
   {#if !list.length}
-    <p class="m-0 p-1 text-[12px] text-muted" title="Mark the shell on a frame, then one or two vertical edges and the compass heading. 2 frames are the least, and about 10 give a good result.">
+    <p class="m-0 p-1 text-[12px] text-muted" title="Mark the shell on a frame, then one or two vertical edges and the compass heading. The least is 2 frames, and about 10 give a good result.">
       {shot.name} has no sightings yet.
     </p>
   {/if}
@@ -86,7 +89,7 @@
         <button class="text-muted hover:text-bad" aria-label="Delete sighting" onclick={() => deleteSighting(s.id)}><Trash2 size={13} /></button>
       </div>
       {#if !ui.folded[s.id]}
-      <dl class="dl mt-1.5 text-[12px]">
+      <dl class="dl mt-1.5 text-[12px]" transition:fold>
         <dt>Clip</dt><dd class="truncate" title={clipName(s.clipId)}>{clipName(s.clipId)}</dd>
         <dt>Time</dt>
         <dd><button class="num text-accent underline decoration-dotted underline-offset-2 hover:text-text" onclick={() => ongo(s.clipId, s.timeS, s.id)} title="Go to this frame">{timecode(s.timeS)}</button></dd>
@@ -95,7 +98,7 @@
         <dt>Edges</dt><dd class="num">{s.edges.length}</dd>
         <dt>Azimuth</dt><dd class="num">{a.ok ? deg(a.az) : '-'}</dd>
         <dt>Elevation</dt><dd class="num">{a.ok ? deg(a.el) : '-'}</dd>
-        <dt>Shell speed</dt><dd class="num" title="How fast the shell moves as seen by the camera, since the sighting before this one">{speeds.has(s.id) ? `${speeds.get(s.id)!.toFixed(2)} deg/s` : '-'}</dd>
+        <dt>Shell speed</dt><dd class="num" title="How fast the shell moves as the camera sees it, since the sighting before this one">{speeds.has(s.id) ? `${speeds.get(s.id)!.toFixed(2)} deg/s` : '-'}</dd>
         {#if a.ok}
           <dt>Camera</dt><dd class="num" title={CAMERA[a.cam.source]}>heading {deg(a.cam.h)}, pitch {deg(a.cam.p)}{a.cam.r ? `, roll ${deg(a.cam.r)}` : ''}{a.cam.source === 'edges' ? ' (edges)' : a.cam.source === 'auto' ? ' (auto)' : ''}</dd>
         {/if}
@@ -110,7 +113,7 @@
           <span title={s.edges.length && s.pitch.manual == null ? 'The marked edges give the pitch. Type a pitch to use it instead.' : 'The pitch of the camera, up positive. Marked edges give it too.'}>
             <AutoNum label={s.edges.length && s.pitch.manual == null ? 'Pitch (edges win)' : 'Pitch'} unit="deg" kind="pitch" step={0.1} bind:field={s.pitch} required={s.edges.length ? 'from edges' : 'required'} />
           </span>
-          <span title="The roll of the camera. Without a value the camera is level."><AutoNum label="Roll" unit="deg" kind="roll" step={0.1} bind:field={s.roll} required="level" /></span>
+          <span title="The roll of the camera. Without a value, the camera is level."><AutoNum label="Roll" unit="deg" kind="roll" step={0.1} bind:field={s.roll} required="level" /></span>
         </div>
       {#if todo.length}<div class="note warn mt-1.5">Still needs: {todo.join(', ')}.</div>
       {:else if !r.ok && !needsCoords(r.error)}<div class="note bad mt-1.5">{r.error}</div>{/if}

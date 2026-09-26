@@ -1,4 +1,4 @@
-/** Frame times of a clip: a sorted list of presentation times in seconds (prepareClip.ts). Deterministic, without I/O. */
+/** Frame times of a clip, as a sorted list of presentation times in seconds (prepareClip.ts). Deterministic, no I/O. */
 
 /**
  * How close two times must be to count as the same frame. Sightings store the presentation time of their frame, so
@@ -8,7 +8,7 @@ const SAME_FRAME_S = 0.004;
 /** True when both times belong to the same frame. */
 export const sameFrame = (a: number, b: number) => Math.abs(a - b) < SAME_FRAME_S;
 
-/** The index of the frame on screen at time t: the last frame that starts at or before t. */
+/** The index of the frame on screen at time t, which is the last frame that starts at or before t. */
 export function frameIndexAt(frames: number[], t: number): number {
   let lo = 0, hi = frames.length - 1;
   if (hi < 0 || t <= frames[0]) return 0;
@@ -17,12 +17,12 @@ export function frameIndexAt(frames: number[], t: number): number {
   return lo;
 }
 
-/** The start time of the frame on screen at time t. Without a frame list, t itself. */
+/** The start time of the frame on screen at time t. Without a frame list, it is t itself. */
 export const frameTimeAt = (frames: number[] | undefined, t: number) => (frames?.length ? frames[frameIndexAt(frames, t)] : t);
 
 /**
- * Where to seek so the video shows the frame that starts at t. Half a millisecond past its start, so a rounded time
- * never lands on the frame before.
+ * The seek time that makes the video show the frame that starts at t. It lies half a millisecond past the frame start,
+ * so a rounded time never lands on the frame before.
  */
 export const seekTimeFor = (t: number) => t + 0.0005;
 

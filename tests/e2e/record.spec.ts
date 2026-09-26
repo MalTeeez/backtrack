@@ -26,7 +26,7 @@ test('rolling buffer keeps the last N seconds and the clip survives a reload', a
   await expect(row).toHaveCount(1);
   await expect(row.getByText('Buffer')).toBeVisible();
   // between N and 2N seconds, with a real duration (the WebM duration fix)
-  const len = await row.locator('td').nth(3).innerText();
+  const len = await row.locator('td').nth(4).innerText();
   const [m, s] = len.split(':').map(Number);
   expect(m * 60 + s).toBeGreaterThanOrEqual(4);
   expect(m * 60 + s).toBeLessThanOrEqual(11);
@@ -59,7 +59,7 @@ test('upload accepts a WebM file', async ({ page }) => {
   const row = page.getByTestId('clip-list').locator('tbody tr');
   await expect(row).toHaveCount(1);
   await expect(row.getByText('Upload')).toBeVisible();
-  await expect(row.locator('td').nth(4)).toHaveText('320x180');
+  await expect(row.locator('td').nth(5)).toHaveText('320x180');
 });
 
 test('without screen capture the page points to upload', async ({ page }) => {
